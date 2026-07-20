@@ -7,10 +7,10 @@ export function parseOpenAISSEChunk(arg0) {
   const tmp1 = [];
   const tmp2 = arg0.split("\n");
   for (const tmp0 of tmp2) {
-    if (!tmp0.startsWith("data: ")) {
+    if (!/^data:\s?/.test(tmp0)) {
       continue;
     }
-    const tmp02 = tmp0.slice(6).trim();
+    const tmp02 = tmp0.replace(/^data:\s?/, "").trim();
     if (tmp02 === "[DONE]") {
       tmp1.push({
         done: true,
@@ -48,6 +48,7 @@ export class OpenAIStreamProcessor {
     this._errorMessage = null;
     this._allowedTools = null;
     this._usage = null;
+    this._receivedOutputText = false;
   }
   getUsage() {
     return this._usage;
@@ -89,8 +90,15 @@ export class OpenAIStreamProcessor {
           if (tmp12 === "reasoning" || tmp22 === "thinking") {
             tmp3.push(buildThinkingDelta(this._messageId, tmp2.delta));
           } else {
+            this._receivedOutputText = true;
             this._handleOutputTextDelta(tmp2.delta, tmp3);
           }
+        }
+        break;
+      case "response.output_text.done":
+        if (!this._receivedOutputText && tmp2.text) {
+          this._receivedOutputText = true;
+          this._handleOutputTextDelta(tmp2.text, tmp3);
         }
         break;
       case "response.output_item.added":
@@ -132,7 +140,14 @@ export class OpenAIStreamProcessor {
               this._stopReason = "tool_calls";
             }
           }
-          return this._onDone();
+          if (!this._receivedOutputText && Array.isArray(tmp02?.output)) {
+            const tmp03 = tmp02.output.filter(arg0 => arg0?.type === "message").flatMap(arg0 => Array.isArray(arg0.content) ? arg0.content : []).filter(arg0 => arg0?.type === "output_text" || arg0?.type === "text").map(arg0 => typeof arg0.text === "string" ? arg0.text : arg0.text?.value || "").join("");
+            if (tmp03) {
+              this._receivedOutputText = true;
+              this._handleOutputTextDelta(tmp03, tmp3);
+            }
+          }
+          return [...tmp3, ...this._onDone()];
         }
       case "response.incomplete":
         {

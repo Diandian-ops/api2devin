@@ -1,20 +1,23 @@
 {
-  "name": "devin-byok-bridge",
-  "displayName": "Devin BYOK Bridge",
-  "description": "Devin Desktop BYOK 桥接 — 本地 API Key，多模型路由（兼容旧版 Windsurf）",
-  "version": "2.6.1",
-  "publisher": "ycx932436",
+  "name": "api2devin",
+  "displayName": "API2Devin",
+  "description": "API2Devin - Devin Desktop BYOK 桥接，基于 ycx932436/devin-byok-bridge Fork",
+  "version": "2.6.2",
+  "publisher": "Diandian-ops",
   "license": "MIT",
   "scripts": {
-    "test": "node --test \"test/*.mjs\""
+    "test": "node --test \"test/*.mjs\"",
+    "package": "npx @vscode/vsce package --no-dependencies",
+    "build": "npm run package",
+    "prepackage": "npm test"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ycx932436/devin-byok-bridge.git"
+    "url": "https://github.com/Diandian-ops/api2devin.git"
   },
-  "homepage": "https://github.com/ycx932436/devin-byok-bridge",
+  "homepage": "https://github.com/Diandian-ops/api2devin",
   "bugs": {
-    "url": "https://github.com/ycx932436/devin-byok-bridge/issues"
+    "url": "https://github.com/Diandian-ops/api2devin/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -22,26 +25,22 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onStartupFinished",
-    "onView:devin-byok-bridge.sidebar"
-  ],
   "main": "./extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "devin-byok-bridge",
-          "title": "Devin BYOK Bridge",
+          "id": "api2devin",
+          "title": "API2Devin",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "devin-byok-bridge": [
+      "api2devin": [
         {
           "type": "webview",
-          "id": "devin-byok-bridge.sidebar",
+          "id": "api2devin.sidebar",
           "name": "控制面板",
           "icon": "media/icon.svg"
         }
@@ -49,24 +48,24 @@
     },
     "commands": [
       {
-        "command": "devin-byok-bridge.startProxy",
-        "title": "Devin BYOK Bridge: 启动代理"
+        "command": "api2devin.startProxy",
+        "title": "API2Devin: 启动代理"
       },
       {
-        "command": "devin-byok-bridge.stopProxy",
-        "title": "Devin BYOK Bridge: 停止代理"
+        "command": "api2devin.stopProxy",
+        "title": "API2Devin: 停止代理"
       },
       {
-        "command": "devin-byok-bridge.applyPatch",
-        "title": "Devin BYOK Bridge: 安装补丁"
+        "command": "api2devin.applyPatch",
+        "title": "API2Devin: 安装补丁"
       },
       {
-        "command": "devin-byok-bridge.revertPatch",
-        "title": "Devin BYOK Bridge: 还原补丁"
+        "command": "api2devin.revertPatch",
+        "title": "API2Devin: 还原补丁"
       },
       {
-        "command": "devin-byok-bridge.reloadWorkbench",
-        "title": "Devin BYOK Bridge: 重载窗口（补丁生效）"
+        "command": "api2devin.reloadWorkbench",
+        "title": "API2Devin: 重载窗口（补丁生效）"
       }
     ]
   }

@@ -3,6 +3,7 @@
   let tmp1 = "";
   const tmp2 = new Map();
   let tmp3 = tmp0.getState() || {};
+  let gatewayConfig = { gateways: [], activeSlots: { byok1: null, byok2: null } };
   const fn = () => ({
     1: {
       options: Array.isArray(tmp3.cachedModelOptions1) ? tmp3.cachedModelOptions1 : [],
@@ -15,6 +16,57 @@
       apiKey: typeof tmp3.cachedModelApiKey2 === "string" ? tmp3.cachedModelApiKey2 : ""
     }
   });
+  function renderGatewayList() {
+    const container = fn4("gatewayList");
+    if (!container) return;
+    if (!gatewayConfig.gateways.length) {
+      container.innerHTML = '<div style="font-size:11px;color:#888;text-align:center;padding:12px">暂无网关，点击"+ 添加"开始配置</div>';
+      fn4("multiModelSelectionPanel").style.display = "none";
+      return;
+    }
+    container.innerHTML = gatewayConfig.gateways.map(gw => {
+      const modelCount = gw.models.length;
+      const hasModels = modelCount > 0;
+      return `<div class="guide-block" style="margin-bottom:8px;padding:8px;border-left:3px solid #0ea5e9">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b style="font-size:12px">${fn6(gw.name)}</b>
+          <button type="button" class="btn btn-s sm" data-ws-action="deleteGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">删除</button>
+        </div>
+        <div style="font-size:10px;color:#888;margin-bottom:4px">${fn6(gw.baseUrl)}</div>
+        <div style="font-size:10px;color:#888;margin-bottom:6px">模型: ${hasModels ? modelCount + ' 个' : '未加载'}</div>
+        <button type="button" class="btn btn-s sm" data-ws-action="fetchGatewayModels" data-gateway-id="${gw.id}" style="width:100%;font-size:11px">${hasModels ? '重新获取' : '获取模型列表'}</button>
+      </div>`;
+    }).join('');
+    updateMultiModelDropdowns();
+  }
+  function updateMultiModelDropdowns() {
+    const primarySelect = fn4("cfgMultiPrimaryModel");
+    const thinkingSelect = fn4("cfgMultiThinkingModel");
+    if (!primarySelect || !thinkingSelect) return;
+    const allModels = [];
+    gatewayConfig.gateways.forEach(gw => {
+      gw.models.forEach(model => {
+        const modelId = typeof model === 'string' ? model : (model.id || model.name || '');
+        if (modelId) allModels.push({ gatewayId: gw.id, gatewayName: gw.name, modelId: modelId });
+      });
+    });
+    if (!allModels.length) {
+      primarySelect.innerHTML = '<option value="" disabled selected>请先获取模型列表</option>';
+      thinkingSelect.innerHTML = '<option value="" disabled selected>请先获取模型列表</option>';
+      fn4("multiModelSelectionPanel").style.display = "none";
+      return;
+    }
+    const buildOptions = (selected) => {
+      return allModels.map(m => {
+        const value = m.gatewayId + '::' + m.modelId;
+        const isSelected = selected && selected.gatewayId === m.gatewayId && selected.model === m.modelId;
+        return `<option value="${value}"${isSelected ? ' selected' : ''}>[${fn6(m.gatewayName)}] ${fn6(m.modelId)}</option>`;
+      }).join('');
+    };
+    primarySelect.innerHTML = buildOptions(gatewayConfig.activeSlots.byok1);
+    thinkingSelect.innerHTML = buildOptions(gatewayConfig.activeSlots.byok2);
+    fn4("multiModelSelectionPanel").style.display = "block";
+  }
   function fn2(arg0) {
     return arg0 === 2 ? 2 : 1;
   }
@@ -173,7 +225,7 @@
     gpt56: [["", "关闭 · 不启用 reasoning"], ["low", "低 · reasoning.effort=low"], ["medium", "中 · reasoning.effort=medium"], ["high", "高 · reasoning.effort=high"], ["xhigh", "极高 · reasoning.effort=xhigh"], ["max", "Max · GPT-5.6 最深推理"]],
     gemini: [["", "默认 · medium（API 默认，不覆盖）"], ["minimal", "Minimal · 最低思考 / 最低延迟"], ["low", "Low · 速度优先"], ["medium", "Medium · 推荐平衡"], ["high", "High · 最深推理"]]
   };
-  const tmp21 = new Set(["cfgByok1Host", "cfgByok1Key", "cfgByok1Model", "cfgByok1ThinkingEffort", "cfgByok1ReasoningMode", "cfgByok1ServiceTier", "cfgByok2Host", "cfgByok2Key", "cfgByok2Model", "cfgByok2ThinkingEffort", "cfgByok2ReasoningMode", "cfgByok2ServiceTier", "cfgHybridPort", "cfgInferencePort", "cfgAnthropicPath", "cfgOpenaiPath", "cfgMaxTokens", "cfgCompletionTimeoutMs", "cfgSysPromptOverride", "cfgSysPromptPath"]);
+  const tmp21 = new Set(["cfgByok1Host", "cfgByok1Key", "cfgByok1Model", "cfgByok1ThinkingEffort", "cfgByok1ReasoningMode", "cfgByok1ServiceTier", "cfgByok2Host", "cfgByok2Key", "cfgByok2Model", "cfgByok2ThinkingEffort", "cfgByok2ReasoningMode", "cfgByok2ServiceTier", "cfgHybridPort", "cfgInferencePort", "cfgAnthropicPath", "cfgOpenaiPath", "cfgMaxTokens", "cfgCompletionTimeoutMs", "cfgSysPromptOverride", "cfgSysPromptPath", "cfgSimpleHost", "cfgSimpleKey", "cfgSimplePrimaryModel", "cfgSimpleThinkingModel", "cfgSimplePrimaryThinkingEffort", "cfgSimpleThinkingEffort"]);
   let tmp22 = null;
   function fn20a(arg0) {
     return !!(arg0 && arg0.id && tmp21.has(arg0.id));
@@ -275,6 +327,61 @@
       const tmp32 = tmp22 && tmp22.value || "";
       fn19(arg0, tmp32);
     });
+    
+    const simplePrimaryModelSelect = fn4("cfgSimplePrimaryModel");
+    const simpleThinkingModelSelect = fn4("cfgSimpleThinkingModel");
+    const simplePrimaryThinkingSelect = fn4("cfgSimplePrimaryThinkingEffort");
+    const simpleThinkingSelect = fn4("cfgSimpleThinkingEffort");
+    const simplePrimaryThinkingLabel = fn4("cfgSimplePrimaryThinkingLabel");
+    const simpleThinkingLabel = fn4("cfgSimpleThinkingLabel");
+    const simplePrimaryThinkingRow = fn4("cfgSimplePrimaryThinkingEffortRow");
+    const simpleThinkingRow = fn4("cfgSimpleThinkingEffortRow");
+    
+    if (simplePrimaryModelSelect && simplePrimaryThinkingSelect && simplePrimaryThinkingLabel) {
+      const modelValue = simplePrimaryModelSelect.value || "";
+      const provider = fn15(modelValue);
+      const shouldShow = fn17(provider, modelValue);
+      
+      if (simplePrimaryThinkingRow) {
+        simplePrimaryThinkingRow.classList.toggle("hidden", !shouldShow);
+      }
+      
+      if (simplePrimaryThinkingLabel) {
+        simplePrimaryThinkingLabel.textContent = fn16(provider);
+      }
+      
+      if (shouldShow) {
+        const currentEffort = simplePrimaryThinkingSelect.value || "";
+        const normalizedEffort = fn18(provider, currentEffort, modelValue);
+        const isGpt56 = provider === "gpt" && /^gpt-5\.6(?:-|$)/.test(fn14(modelValue));
+        const options = isGpt56 ? tmp20.gpt56 : tmp20[provider] || tmp20.claude;
+        simplePrimaryThinkingSelect.innerHTML = options.map(([val, label]) => "<option value=\"" + val + "\"" + (normalizedEffort === val ? " selected" : "") + ">" + label + "</option>").join("");
+        simplePrimaryThinkingSelect.value = normalizedEffort;
+      }
+    }
+    
+    if (simpleThinkingModelSelect && simpleThinkingSelect && simpleThinkingLabel) {
+      const modelValue = simpleThinkingModelSelect.value || "";
+      const provider = fn15(modelValue);
+      const shouldShow = fn17(provider, modelValue);
+      
+      if (simpleThinkingRow) {
+        simpleThinkingRow.classList.toggle("hidden", !shouldShow);
+      }
+      
+      if (simpleThinkingLabel) {
+        simpleThinkingLabel.textContent = fn16(provider);
+      }
+      
+      if (shouldShow) {
+        const currentEffort = simpleThinkingSelect.value || "";
+        const normalizedEffort = fn18(provider, currentEffort, modelValue);
+        const isGpt56 = provider === "gpt" && /^gpt-5\.6(?:-|$)/.test(fn14(modelValue));
+        const options = isGpt56 ? tmp20.gpt56 : tmp20[provider] || tmp20.claude;
+        simpleThinkingSelect.innerHTML = options.map(([val, label]) => "<option value=\"" + val + "\"" + (normalizedEffort === val ? " selected" : "") + ">" + label + "</option>").join("");
+        simpleThinkingSelect.value = normalizedEffort;
+      }
+    }
   }
   function fn21(arg0) {
     if (typeof arg0 === "string") {
@@ -300,29 +407,30 @@
     const tmp4 = arg0[tmp32 + "ANTHROPIC_API_HOST"] || (tmp22 === 1 ? arg0.ANTHROPIC_API_HOST || "" : "");
     const tmp5 = arg0[tmp32 + "ANTHROPIC_API_KEY"] || (tmp22 === 1 ? arg0.ANTHROPIC_API_KEY || "" : "");
     const tmp6 = arg0[tmp32 + "MODEL"] || (tmp22 === 1 ? arg0.DEFAULT_MODEL || "" : "");
+    const tmp7 = arg0[tmp32 + "THINKING_EFFORT"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_EFFORT || "" : "");
     fn13("cfgByok" + tmp22 + "Host", tmp4);
     fn13("cfgByok" + tmp22 + "Key", tmp5);
-    fn13("cfgByok" + tmp22 + "ThinkingEffort", arg0[tmp32 + "THINKING_EFFORT"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_EFFORT || "" : ""));
+    fn13("cfgByok" + tmp22 + "ThinkingEffort", tmp7);
     fn13("cfgByok" + tmp22 + "ServiceTier", arg0[tmp32 + "OPENAI_SERVICE_TIER"] || (tmp22 === 1 ? arg0.OPENAI_SERVICE_TIER || "" : ""));
     fn13("cfgByok" + tmp22 + "ReasoningMode", arg0[tmp32 + "OPENAI_REASONING_MODE"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_MODE || "" : ""));
-    fn19(arg1, tmp6, arg0[tmp32 + "THINKING_EFFORT"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_EFFORT || "" : ""));
-    const tmp7 = fn11(tmp22);
-    const tmp8 = fn();
-    const tmp9 = !!tmp8[tmp22].apiKey && !!tmp7 && tmp8[tmp22].apiKey === tmp7;
-    if (tmp8[tmp22].options.length && !tmp9) {
+    fn19(arg1, tmp6, tmp7);
+    const tmp8 = fn11(tmp22);
+    const tmp9 = fn();
+    const tmp10 = !!tmp9[tmp22].apiKey && !!tmp8 && tmp9[tmp22].apiKey === tmp8;
+    if (tmp9[tmp22].options.length && !tmp10) {
       tmp3["cachedModelOptions" + tmp22] = [];
       tmp3["lastSelectedModel" + tmp22] = "";
     }
     if (tmp6) {
       tmp3["lastSelectedModel" + tmp22] = tmp6;
     }
-    const tmp10 = fn4("cfgByok" + tmp22 + "Model");
-    const tmp11 = tmp6 || (tmp9 && document.activeElement === tmp10 ? tmp10.value : "");
-    if (tmp10) {
+    const tmp11 = fn4("cfgByok" + tmp22 + "Model");
+    const tmp12 = tmp6 || (tmp10 && document.activeElement === tmp11 ? tmp11.value : "");
+    if (tmp11) {
       const tmp02 = fn()[tmp22].options;
-      fn25(tmp10, tmp9 ? tmp02 : [], tmp11);
+      fn25(tmp11, tmp10 ? tmp02 : [], tmp12);
     }
-    fn19(arg1, tmp11 || tmp6, arg0[tmp32 + "THINKING_EFFORT"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_EFFORT || "" : ""));
+    fn19(arg1, tmp12 || tmp6, arg0[tmp32 + "THINKING_EFFORT"] || (tmp22 === 1 ? arg0.OPENAI_REASONING_EFFORT || "" : ""));
   }
   function fn24(arg0, arg1) {
     if (arg0) {
@@ -353,37 +461,6 @@
       fn8(fn4("proxyRunBadge"), !!arg1.running, arg1.running ? "运行中" : "已停止");
     }
     fn20();
-  }
-  function fn24a() {
-    const tmp12 = fn4("cfgAnthropicPath");
-    const tmp22 = fn4("cfgOpenaiPath");
-    if (!tmp12 || !tmp22 || fn4("advancedRouteBody")) {
-      return;
-    }
-    const tmp32 = document.createElement("div");
-    tmp32.className = "guide-block";
-    tmp32.style.marginBottom = "10px";
-    tmp32.innerHTML = "<div class=\"card-head between\" style=\"margin-bottom:6px;padding:0\"><span class=\"toggle-section collapsed\" data-ws-toggle=\"advancedRouteBody\">高级路由</span><span class=\"badge badge-warn\">可选</span></div><div id=\"advancedRouteBody\" class=\"hidden\"><div class=\"fg\"><label>Anthropic API Path</label></div><div class=\"fg\"><label>OpenAI API Path</label></div><div class=\"guide-note\">GPT 默认先走 <code>/v1/responses</code>；网关不支持时会回退 <code>/v1/chat/completions</code>。如网关明确只支持旧接口，可在这里直接填写。</div></div>";
-    const tmp4 = fn4("cfgMaxTokens");
-    const tmp5 = tmp4 && tmp4.parentElement && tmp4.parentElement.parentElement;
-    const tmp6 = tmp5 && tmp5.parentElement || tmp22.parentElement;
-    if (tmp6 && tmp5) {
-      tmp6.insertBefore(tmp32, tmp5);
-    } else {
-      tmp22.insertAdjacentElement("afterend", tmp32);
-    }
-    const tmp7 = fn4("advancedRouteBody");
-    const tmp8 = tmp7 && tmp7.querySelectorAll(".fg");
-    tmp12.type = "text";
-    tmp12.placeholder = "/v1/messages";
-    tmp22.type = "text";
-    tmp22.placeholder = "/v1/responses 或 /v1/chat/completions";
-    if (tmp8 && tmp8[0]) {
-      tmp8[0].appendChild(tmp12);
-    }
-    if (tmp8 && tmp8[1]) {
-      tmp8[1].appendChild(tmp22);
-    }
   }
   function fn25(arg0, arg1, arg2) {
     if (!arg0) {
@@ -784,6 +861,123 @@
         baseUrl: tmp23
       };
       fn5("fetchModels", tmp33);
+    } else if (tmp32 === "connectAndLoadModels") {
+      const baseUrlInput = fn4("cfgSimpleHost");
+      const apiKeyInput = fn4("cfgSimpleKey");
+      const statusDiv = fn4("modelFetchStatus");
+      
+      const baseUrl = (baseUrlInput && baseUrlInput.value || "").trim();
+      const apiKey = (apiKeyInput && apiKeyInput.value || "").trim();
+      
+      if (!baseUrl || !apiKey) {
+        fn7("config", "error", "请填写 Base URL 和 API Key");
+        if (statusDiv) {
+          statusDiv.textContent = "✗ 请先填写完整配置";
+          statusDiv.style.color = "var(--vscode-errorForeground)";
+        }
+        return;
+      }
+      
+      if (statusDiv) {
+        statusDiv.textContent = "正在连接...";
+        statusDiv.style.color = "var(--vscode-descriptionForeground)";
+      }
+      
+      fn7("config", "busy", "正在连接网关并获取模型...", 45000);
+      fn5("connectAndLoadModels", {
+        baseUrl: baseUrl,
+        apiKey: apiKey
+      });
+    } else if (tmp32 === "saveSimpleConfig") {
+      const baseUrlInput = fn4("cfgSimpleHost");
+      const apiKeyInput = fn4("cfgSimpleKey");
+      const modelSelect = fn4("cfgSimplePrimaryModel");
+      const thinkingModelSelect = fn4("cfgSimpleThinkingModel");
+      const primaryThinkingSelect = fn4("cfgSimplePrimaryThinkingEffort");
+      const thinkingSelect = fn4("cfgSimpleThinkingEffort");
+      
+      const baseUrl = (baseUrlInput && baseUrlInput.value || "").trim();
+      const apiKey = (apiKeyInput && apiKeyInput.value || "").trim();
+      const primaryModel = (modelSelect && modelSelect.value || "").trim();
+      const thinkingModel = (thinkingModelSelect && thinkingModelSelect.value || "").trim();
+      const primaryThinkingEffort = (primaryThinkingSelect && primaryThinkingSelect.value || "").trim();
+      const thinkingEffort = (thinkingSelect && thinkingSelect.value || "").trim();
+      
+      if (!baseUrl || !apiKey || !primaryModel || !thinkingModel) {
+        fn7("config", "error", "请填写完整配置");
+        return;
+      }
+      
+      fn7("config", "busy", "正在保存配置...");
+      fn5("saveSimpleConfig", {
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        primaryModel: primaryModel,
+        thinkingModel: thinkingModel,
+        primaryThinkingEffort: primaryThinkingEffort,
+        thinkingEffort: thinkingEffort
+      });
+    } else if (tmp32 === "showAddGatewayForm") {
+      const form = fn4("addGatewayForm");
+      if (form) {
+        form.classList.toggle("hidden");
+      }
+    } else if (tmp32 === "cancelAddGateway") {
+      const form = fn4("addGatewayForm");
+      if (form) {
+        form.classList.add("hidden");
+      }
+      fn4("newGatewayName").value = "";
+      fn4("newGatewayBaseUrl").value = "";
+      fn4("newGatewayApiKey").value = "";
+    } else if (tmp32 === "addGateway") {
+      const name = (fn4("newGatewayName").value || "").trim();
+      const baseUrl = (fn4("newGatewayBaseUrl").value || "").trim();
+      const apiKey = (fn4("newGatewayApiKey").value || "").trim();
+      if (!name || !baseUrl || !apiKey) {
+        fn7("config", "error", "请填写完整网关信息");
+        return;
+      }
+      fn7("config", "busy", "正在添加网关...");
+      fn5("addGateway", { name: name, baseUrl: baseUrl, apiKey: apiKey });
+      fn4("newGatewayName").value = "";
+      fn4("newGatewayBaseUrl").value = "";
+      fn4("newGatewayApiKey").value = "";
+      fn4("addGatewayForm").classList.add("hidden");
+    } else if (tmp32 === "deleteGateway") {
+      const gatewayId = tmp22.getAttribute("data-gateway-id");
+      if (confirm("确定要删除该网关吗？")) {
+        fn7("config", "busy", "正在删除网关...");
+        fn5("deleteGateway", { gatewayId: gatewayId });
+      }
+    } else if (tmp32 === "fetchGatewayModels") {
+      const gatewayId = tmp22.getAttribute("data-gateway-id");
+      fn7("config", "busy", "正在获取模型列表...");
+      fn5("fetchGatewayModels", { gatewayId: gatewayId });
+    } else if (tmp32 === "saveMultiGatewayConfig") {
+      const primarySelect = fn4("cfgMultiPrimaryModel");
+      const thinkingSelect = fn4("cfgMultiThinkingModel");
+      const primaryThinkingSelect = fn4("cfgMultiPrimaryThinkingEffort");
+      const thinkingEffortSelect = fn4("cfgMultiThinkingEffort");
+      const primaryValue = (primarySelect && primarySelect.value || "").trim();
+      const thinkingValue = (thinkingSelect && thinkingSelect.value || "").trim();
+      if (!primaryValue || !thinkingValue) {
+        fn7("config", "error", "请选择主模型和思考模型");
+        return;
+      }
+      const [byok1GatewayId, byok1Model] = primaryValue.split("::");
+      const [byok2GatewayId, byok2Model] = thinkingValue.split("::");
+      const byok1ThinkingEffort = (primaryThinkingSelect && primaryThinkingSelect.value || "").trim();
+      const byok2ThinkingEffort = (thinkingEffortSelect && thinkingEffortSelect.value || "").trim();
+      fn7("config", "busy", "正在保存配置...");
+      fn5("saveMultiGatewayConfig", {
+        byok1GatewayId: byok1GatewayId,
+        byok1Model: byok1Model,
+        byok1ThinkingEffort: byok1ThinkingEffort,
+        byok2GatewayId: byok2GatewayId,
+        byok2Model: byok2Model,
+        byok2ThinkingEffort: byok2ThinkingEffort
+      });
     } else if (tmp32 === "promptTemplates") {
       fn7("config", "busy", "请选择提示词模板...");
       fn5("openPromptTemplatePicker", {
@@ -851,16 +1045,18 @@
         value: tmp12.checked === true
       });
     } else if (fn20a(tmp12)) {
-      if (tmp12.id === "cfgByok1Model" || tmp12.id === "cfgByok2Model" || tmp12.id === "cfgByok1ThinkingEffort" || tmp12.id === "cfgByok2ThinkingEffort") {
-        const tmp02 = /cfgByok2/.test(tmp12.id) ? 2 : 1;
+      if (tmp12.id === "cfgByok1Model" || tmp12.id === "cfgByok2Model" || tmp12.id === "cfgByok1ThinkingEffort" || tmp12.id === "cfgByok2ThinkingEffort" || tmp12.id === "cfgSimplePrimaryModel" || tmp12.id === "cfgSimpleThinkingModel" || tmp12.id === "cfgSimplePrimaryThinkingEffort" || tmp12.id === "cfgSimpleThinkingEffort") {
+        const tmp02 = /cfgByok2|cfgSimpleThinking/.test(tmp12.id) ? 2 : 1;
         if (tmp12.id.endsWith("Model")) {
-          tmp3["lastSelectedModel" + tmp02] = tmp12.value || "";
-          fn3(tmp02);
+          if (!tmp12.id.startsWith("cfgSimple")) {
+            tmp3["lastSelectedModel" + tmp02] = tmp12.value || "";
+            fn3(tmp02);
+          }
         }
         fn20();
-      } else if (tmp12.id === "cfgByok1Host" || tmp12.id === "cfgByok2Host") {
+      } else if (tmp12.id === "cfgByok1Host" || tmp12.id === "cfgByok2Host" || tmp12.id === "cfgSimpleHost") {
         fn9("Base URL 已修改，请重新加载模型", tmp12.id === "cfgByok2Host" ? 2 : 1);
-      } else if (tmp12.id === "cfgByok1Key" || tmp12.id === "cfgByok2Key") {
+      } else if (tmp12.id === "cfgByok1Key" || tmp12.id === "cfgByok2Key" || tmp12.id === "cfgSimpleKey") {
         fn9("API Key 已修改，请重新加载模型", tmp12.id === "cfgByok2Key" ? 2 : 1);
       }
       fn20b(true);
@@ -868,7 +1064,7 @@
   });
   document.addEventListener("input", arg0 => {
     const tmp12 = arg0.target;
-    if (tmp12 && (tmp12.id === "cfgDefaultModelCustom" || /cfgByok[12]Model/.test(tmp12.id))) {
+    if (tmp12 && (tmp12.id === "cfgDefaultModelCustom" || /cfgByok[12]Model/.test(tmp12.id) || tmp12.id === "cfgSimplePrimaryModel" || tmp12.id === "cfgSimpleThinkingModel")) {
       fn20();
     }
     if (fn20a(tmp12)) {
@@ -881,6 +1077,23 @@
       fn35(tmp12.proxy);
       fn24(tmp12.config, tmp12.proxy);
       fn12(tmp12.patch);
+      if (tmp12.gatewayConfig) {
+        gatewayConfig = tmp12.gatewayConfig;
+        renderGatewayList();
+      }
+    } else if (tmp12.type === "gatewayAdded") {
+      fn7("config", "success", "网关已添加");
+      fn5("getStatus");
+    } else if (tmp12.type === "gatewayDeleted") {
+      fn7("config", "success", "网关已删除");
+      fn5("getStatus");
+    } else if (tmp12.type === "gatewayModelsLoaded") {
+      const gw = gatewayConfig.gateways.find(g => g.id === tmp12.gatewayId);
+      if (gw) {
+        gw.models = tmp12.models || [];
+        gw.fetchedAt = Date.now();
+        renderGatewayList();
+      }
     } else if (tmp12.type === "actionState" && tmp12.section) {
       fn7(tmp12.section, tmp12.state === "error" ? "error" : "success", tmp12.message || "完成");
     } else if (tmp12.type === "modelList") {
@@ -914,6 +1127,39 @@
       if (tmp12.message) {
         fn7("config", "success", tmp12.message);
       }
+    } else if (tmp12.type === "simpleModelsLoaded") {
+      const primarySelect = fn4("cfgSimplePrimaryModel");
+      const thinkingSelect = fn4("cfgSimpleThinkingModel");
+      const panel = fn4("modelSelectionPanel");
+      const statusDiv = fn4("modelFetchStatus");
+      
+      if (tmp12.models) {
+        const anthropicModels = tmp12.models?.providers?.anthropic?.models || [];
+        const openaiModels = tmp12.models?.providers?.openai?.models || [];
+        const allModels = [...anthropicModels, ...openaiModels];
+        
+        if (allModels.length > 0) {
+          if (primarySelect) {
+            const current = primarySelect.value || tmp3.lastSelectedModel1 || "";
+            fn25(primarySelect, allModels, current);
+          }
+          if (thinkingSelect) {
+            const current = thinkingSelect.value || tmp3.lastSelectedModel2 || "";
+            fn25(thinkingSelect, allModels, current);
+          }
+          
+          if (panel) {
+            panel.style.display = "block";
+          }
+          
+          if (statusDiv) {
+            statusDiv.textContent = "✓ 已获取 " + allModels.length + " 个模型";
+            statusDiv.style.color = "var(--vscode-textLink-foreground)";
+          }
+          
+          fn20();
+        }
+      }
     } else if (tmp12.type === "modelProbeResult") {
       fn33(tmp12.result);
     } else if (tmp12.type === "environmentCheck") {
@@ -939,7 +1185,6 @@
       tmp02.scrollTop = tmp02.scrollHeight;
     }
   });
-  fn24a();
   fn37();
   fn5("getStatus");
   [1, 2].forEach(arg0 => {

@@ -135,7 +135,7 @@ export function sanitizeLogBody(arg0) {
 function buildProviderErrorMessage(arg0, arg1, arg2) {
   const tmp3 = String(arg2 || "").toLowerCase();
   if (/convert_request_failed|not implemented|not_implemented|new_api_error|responses api|invalid.*responses/.test(tmp3)) {
-    return "[" + arg0 + " Error " + arg1 + "] 当前网关不支持 OpenAI Responses API，代理会尝试回退到 /v1/chat/completions；若仍失败，请在高级路由中将 OpenAI API Path 设置为 /v1/chat/completions。";
+    return "[" + arg0 + " Error " + arg1 + "] 当前网关不支持 OpenAI Responses API，代理会自动回退到 /v1/chat/completions。";
   }
   if (/signature.*field required|field required.*signature|validationexception/.test(tmp3) && tmp3.includes("signature")) {
     return "[" + arg0 + " Error " + arg1 + "] Bedrock/Anthropic thinking 历史缺少 signature。请开启新对话，或关闭 BYOK #2 思考强度；代理默认会剔除无 signature 的 thinking 块。";

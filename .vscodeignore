@@ -7,3 +7,7 @@ _deob_test/
 **/captures/**
 proxy-scripts/certs/
 proxy-scripts/debug/
+test/**
+CONTRIBUTING.md
+.git/
+.gitignore

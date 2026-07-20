@@ -261,6 +261,7 @@ class SidebarProvider {
       proxy: this.proxyManager.getStatus(),
       patch: this.getPatchStatus(),
       config: this.getModeScopedConfig(),
+      gatewayConfig: this.getGatewayConfig(),
       logs: this.logLines.slice(-50)
     });
   }
@@ -329,6 +330,94 @@ class SidebarProvider {
     } else {
       return undefined;
     }
+  }
+  getGatewayConfig() {
+    const tmp0 = this.context.globalState.get("MULTI_GATEWAY_CONFIG");
+    if (tmp0 && typeof tmp0 === "object" && Array.isArray(tmp0.gateways)) {
+      return tmp0;
+    }
+    return { gateways: [], activeSlots: { byok1: null, byok2: null } };
+  }
+  saveGatewayConfig(tmp0) {
+    this.context.globalState.update("MULTI_GATEWAY_CONFIG", tmp0);
+  }
+  addGateway(tmp0, tmp1, tmp2) {
+    const tmp3 = this.getGatewayConfig();
+    const tmp4 = { id: "gw-" + Date.now(), name: tmp0, baseUrl: tmp1, apiKey: tmp2, models: [], fetchedAt: 0 };
+    tmp3.gateways.push(tmp4);
+    this.saveGatewayConfig(tmp3);
+    return tmp4.id;
+  }
+  updateGateway(tmp0, tmp1) {
+    const tmp2 = this.getGatewayConfig();
+    const tmp3 = tmp2.gateways.findIndex(g => g.id === tmp0);
+    if (tmp3 >= 0) {
+      tmp2.gateways[tmp3] = { ...tmp2.gateways[tmp3], ...tmp1 };
+      this.saveGatewayConfig(tmp2);
+      return true;
+    }
+    return false;
+  }
+  deleteGateway(tmp0) {
+    const tmp1 = this.getGatewayConfig();
+    const tmp2 = tmp1.gateways.filter(g => g.id !== tmp0);
+    if (tmp2.length < tmp1.gateways.length) {
+      tmp1.gateways = tmp2;
+      if (tmp1.activeSlots.byok1?.gatewayId === tmp0) tmp1.activeSlots.byok1 = null;
+      if (tmp1.activeSlots.byok2?.gatewayId === tmp0) tmp1.activeSlots.byok2 = null;
+      this.saveGatewayConfig(tmp1);
+      return true;
+    }
+    return false;
+  }
+  async fetchGatewayModels(tmp0) {
+    const tmp1 = this.getGatewayConfig();
+    const tmp2 = tmp1.gateways.find(g => g.id === tmp0);
+    if (!tmp2) throw new Error("网关不存在");
+    const tmp3 = await this.fetchModelsFromGateway(tmp2.apiKey, tmp2.baseUrl);
+    const tmp4 = [...(tmp3?.providers?.anthropic?.models || []), ...(tmp3?.providers?.openai?.models || [])];
+    this.updateGateway(tmp0, { models: tmp4, fetchedAt: Date.now() });
+    return tmp4;
+  }
+  setActiveSlot(tmp0, tmp1, tmp2, tmp3) {
+    const tmp4 = this.getGatewayConfig();
+    tmp4.activeSlots[tmp0] = { gatewayId: tmp1, model: tmp2, thinkingEffort: tmp3 || "" };
+    this.saveGatewayConfig(tmp4);
+  }
+  applyGatewayConfigToEnv() {
+    const tmp0 = this.getGatewayConfig();
+    const tmp1 = {};
+    if (tmp0.activeSlots.byok1) {
+      const tmp2 = tmp0.gateways.find(g => g.id === tmp0.activeSlots.byok1.gatewayId);
+      if (tmp2) {
+        tmp1.BYOK1_ANTHROPIC_API_HOST = tmp2.baseUrl;
+        tmp1.BYOK1_ANTHROPIC_API_KEY = tmp2.apiKey;
+        tmp1.BYOK1_OPENAI_API_HOST = tmp2.baseUrl;
+        tmp1.BYOK1_OPENAI_API_KEY = tmp2.apiKey;
+        tmp1.BYOK1_MODEL = tmp0.activeSlots.byok1.model;
+        tmp1.BYOK1_THINKING_EFFORT = tmp0.activeSlots.byok1.thinkingEffort;
+      }
+    }
+    if (tmp0.activeSlots.byok2) {
+      const tmp2 = tmp0.gateways.find(g => g.id === tmp0.activeSlots.byok2.gatewayId);
+      if (tmp2) {
+        tmp1.BYOK2_ANTHROPIC_API_HOST = tmp2.baseUrl;
+        tmp1.BYOK2_ANTHROPIC_API_KEY = tmp2.apiKey;
+        tmp1.BYOK2_OPENAI_API_HOST = tmp2.baseUrl;
+        tmp1.BYOK2_OPENAI_API_KEY = tmp2.apiKey;
+        tmp1.BYOK2_MODEL = tmp0.activeSlots.byok2.model;
+        tmp1.BYOK2_THINKING_EFFORT = tmp0.activeSlots.byok2.thinkingEffort;
+      }
+    }
+    if (tmp1.BYOK1_ANTHROPIC_API_HOST) {
+      tmp1.ANTHROPIC_API_HOST = tmp1.BYOK1_ANTHROPIC_API_HOST;
+      tmp1.ANTHROPIC_API_KEY = tmp1.BYOK1_ANTHROPIC_API_KEY;
+      tmp1.OPENAI_API_HOST = tmp1.BYOK1_OPENAI_API_HOST;
+      tmp1.OPENAI_API_KEY = tmp1.BYOK1_OPENAI_API_KEY;
+      tmp1.DEFAULT_MODEL = tmp1.BYOK1_MODEL;
+      tmp1.OPENAI_REASONING_EFFORT = tmp1.BYOK1_THINKING_EFFORT;
+    }
+    return tmp1;
   }
   getModeScopedConfig(tmp02 = this.proxyManager.readEnvConfig()) {
     const tmp1 = this.normalizeProviderBaseUrl({
@@ -617,7 +706,7 @@ class SidebarProvider {
       return "加载模型失败：Base URL 的 HTTP/HTTPS 协议不匹配。本地或非 443 端口网关请使用 http://，公网 API 请使用 https://。";
     }
     if (/convert_request_failed|not implemented|new_api_error|responses api/i.test(tmp1)) {
-      return "加载模型失败：当前网关可能不支持 OpenAI Responses API；如使用 GPT 网关，请在高级路由中尝试 /v1/chat/completions。";
+      return "加载模型失败：当前网关可能不支持 OpenAI Responses API。";
     }
     if (/signature.*field required|field required.*signature|ValidationException/i.test(tmp1)) {
       return "加载模型失败：上游 Bedrock/Anthropic thinking 历史缺少 signature；请新开对话或关闭思考强度后重试。";
@@ -1833,6 +1922,134 @@ class SidebarProvider {
           this.postActionState("config", "success", tmp3);
           break;
         }
+      case "connectAndLoadModels":
+        {
+          const baseUrl = String(tmp02.baseUrl || "").trim();
+          const apiKey = String(tmp02.apiKey || "").trim();
+          
+          if (!baseUrl || !apiKey) {
+            this.postActionState("config", "error", "请填写 Base URL 和 API Key");
+            break;
+          }
+          
+          this.postActionState("config", "busy", "正在连接网关...");
+          
+          try {
+            const models = await this.fetchModelsFromGateway(apiKey, baseUrl);
+            const modelCount = (models?.providers?.anthropic?.models?.length || 0) + (models?.providers?.openai?.models?.length || 0);
+            this.view?.webview.postMessage({
+              type: "simpleModelsLoaded",
+              models: models,
+              baseUrl: baseUrl,
+              apiKey: apiKey
+            });
+            this.postActionState("config", "success", "已获取 " + modelCount + " 个可用模型");
+          } catch (error) {
+            const errorMsg = this.formatModelFetchError(error);
+            this.postActionState("config", "error", "连接失败：" + errorMsg);
+          }
+          break;
+        }
+      case "saveSimpleConfig":
+        {
+          const baseUrl = String(tmp02.baseUrl || "").trim();
+          const apiKey = String(tmp02.apiKey || "").trim();
+          const primaryModel = String(tmp02.primaryModel || tmp02.model || "").trim();
+          const thinkingModel = String(tmp02.thinkingModel || "").trim() || primaryModel;
+          const primaryThinkingEffort = String(tmp02.primaryThinkingEffort || "").trim();
+          const thinkingEffort = String(tmp02.thinkingEffort || "").trim();
+          
+          if (!baseUrl || !apiKey || !primaryModel || !thinkingModel) {
+            this.postActionState("config", "error", "请填写完整配置信息");
+            break;
+          }
+          
+          const config = {
+            BYOK1_ANTHROPIC_API_HOST: baseUrl,
+            BYOK1_ANTHROPIC_API_KEY: apiKey,
+            BYOK1_OPENAI_API_HOST: baseUrl,
+            BYOK1_OPENAI_API_KEY: apiKey,
+            BYOK1_MODEL: primaryModel,
+            BYOK1_THINKING_EFFORT: primaryThinkingEffort,
+            
+            BYOK2_ANTHROPIC_API_HOST: baseUrl,
+            BYOK2_ANTHROPIC_API_KEY: apiKey,
+            BYOK2_OPENAI_API_HOST: baseUrl,
+            BYOK2_OPENAI_API_KEY: apiKey,
+            BYOK2_MODEL: thinkingModel,
+            BYOK2_THINKING_EFFORT: thinkingEffort,
+            
+            ANTHROPIC_API_HOST: baseUrl,
+            ANTHROPIC_API_KEY: apiKey,
+            OPENAI_API_HOST: baseUrl,
+            OPENAI_API_KEY: apiKey,
+            DEFAULT_MODEL: primaryModel,
+            OPENAI_REASONING_EFFORT: primaryThinkingEffort
+          };
+          
+          await this.applySavedConfig(config, { silent: false });
+          break;
+        }
+      case "addGateway":
+        {
+          const name = String(tmp02.name || "").trim();
+          const baseUrl = String(tmp02.baseUrl || "").trim();
+          const apiKey = String(tmp02.apiKey || "").trim();
+          if (!name || !baseUrl || !apiKey) {
+            this.postActionState("config", "error", "请填写网关名称、Base URL 和 API Key");
+            break;
+          }
+          const gatewayId = this.addGateway(name, baseUrl, apiKey);
+          this.view?.webview.postMessage({ type: "gatewayAdded", gatewayId: gatewayId });
+          this.postActionState("config", "success", "网关已添加");
+          this.refresh();
+          break;
+        }
+      case "deleteGateway":
+        {
+          const gatewayId = String(tmp02.gatewayId || "").trim();
+          if (this.deleteGateway(gatewayId)) {
+            this.view?.webview.postMessage({ type: "gatewayDeleted", gatewayId: gatewayId });
+            this.postActionState("config", "success", "网关已删除");
+            this.refresh();
+          } else {
+            this.postActionState("config", "error", "网关删除失败");
+          }
+          break;
+        }
+      case "fetchGatewayModels":
+        {
+          const gatewayId = String(tmp02.gatewayId || "").trim();
+          this.postActionState("config", "busy", "正在获取模型列表...");
+          try {
+            const models = await this.fetchGatewayModels(gatewayId);
+            this.view?.webview.postMessage({ type: "gatewayModelsLoaded", gatewayId: gatewayId, models: models });
+            this.postActionState("config", "success", "已获取 " + models.length + " 个模型");
+            this.refresh();
+          } catch (err) {
+            const errorMsg = this.formatModelFetchError(err);
+            this.postActionState("config", "error", errorMsg);
+          }
+          break;
+        }
+      case "saveMultiGatewayConfig":
+        {
+          const byok1GatewayId = String(tmp02.byok1GatewayId || "").trim();
+          const byok1Model = String(tmp02.byok1Model || "").trim();
+          const byok1ThinkingEffort = String(tmp02.byok1ThinkingEffort || "").trim();
+          const byok2GatewayId = String(tmp02.byok2GatewayId || "").trim();
+          const byok2Model = String(tmp02.byok2Model || "").trim();
+          const byok2ThinkingEffort = String(tmp02.byok2ThinkingEffort || "").trim();
+          if (!byok1GatewayId || !byok1Model || !byok2GatewayId || !byok2Model) {
+            this.postActionState("config", "error", "请为主模型和思考模型选择网关和模型");
+            break;
+          }
+          this.setActiveSlot("byok1", byok1GatewayId, byok1Model, byok1ThinkingEffort);
+          this.setActiveSlot("byok2", byok2GatewayId, byok2Model, byok2ThinkingEffort);
+          const envConfig = this.applyGatewayConfigToEnv();
+          await this.applySavedConfig(envConfig, { silent: false });
+          break;
+        }
       case "fetchModels":
         {
           const tmp03 = tmp02.slot === 2 ? 2 : 1;
@@ -1974,6 +2191,14 @@ class SidebarProvider {
     const tmp41 = tmp2.BYOK2_OPENAI_SERVICE_TIER || "";
     const tmp44 = tmp2.BYOK1_OPENAI_REASONING_MODE || tmp2.OPENAI_REASONING_MODE || "";
     const tmp45 = tmp2.BYOK2_OPENAI_REASONING_MODE || "";
+    
+    const simpleBaseUrl = esc(tmp2.BYOK1_ANTHROPIC_API_HOST || tmp2.ANTHROPIC_API_HOST || "");
+    const simpleApiKey = esc(tmp2.BYOK1_ANTHROPIC_API_KEY || tmp2.ANTHROPIC_API_KEY || "");
+    const simplePrimaryModel = esc(tmp2.BYOK1_MODEL || tmp2.DEFAULT_MODEL || "");
+    const simpleThinkingModel = esc(tmp2.BYOK2_MODEL || tmp2.BYOK1_MODEL || tmp2.DEFAULT_MODEL || "");
+    const simplePrimaryThinkingEffort = esc(tmp2.BYOK1_THINKING_EFFORT || tmp2.OPENAI_REASONING_EFFORT || "");
+    const simpleThinkingEffort = esc(tmp2.BYOK2_THINKING_EFFORT || "");
+    
     const tmp42 = this.getInstalledVersion();
     const tmp43 = this.getGitRemoteUrl();
     const tmp34 = tmp7 === tmp1.patches.length ? "badge-ok" : "badge-warn";
@@ -2882,20 +3107,21 @@ input:focus, select:focus {
         <div class="guide-block">
             <b>快速使用</b>
             <ol>
-                <li>分别为 BYOK #1 / #2 填写 Base URL、API Key，加载模型并选择模型；Claude/GPT 可设置思考强度。</li>
-                <li>配置完成后点击一键启动。</li>
-                <li>补丁就绪后重载窗口；Windsurf 里分别使用 <code>Claude Opus 4 BYOK</code> 与 <code>Claude Opus 4 Thinking BYOK</code>。</li>
+                <li>在「网关配置」中填写 Base URL 和 API Key，点击「连接并获取模型列表」。</li>
+                <li>在「模型选择」中选择主模型，可选择思考强度，点击「保存配置」。</li>
+                <li>切换到「控制」标签，点击「一键启动」。</li>
+                <li>补丁就绪后重载窗口；Devin 里使用 <code>Claude Opus 4 BYOK</code> 或 <code>Claude Opus 4 Thinking BYOK</code>。</li>
             </ol>
         </div>
         <div class="guide-block">
             <b>日常使用</b>
             <ul>
-                <li>只换 API Key 或模型：修改后会自动保存。</li>
+                <li>只换 API Key 或模型：修改后重新保存即可。</li>
                 <li>聊天没有走代理：重新安装补丁并重载窗口。</li>
                 <li>模型列表加载失败：检查 API Key、余额、网络和日志错误。</li>
             </ul>
         </div>
-        <div class="guide-note">BYOK #1 对应 Windsurf 的 <code>Claude Opus 4 BYOK</code>；BYOK #2 对应 <code>Claude Opus 4 Thinking BYOK</code>。两套 API / 模型完全独立。</div>
+        <div class="guide-note">配置会自动同步到两个 BYOK 槽位，可以在 Devin 中灵活使用不同的模型入口。</div>
     </div>
 </div>
 
@@ -2927,40 +3153,52 @@ input:focus, select:focus {
 
     <!-- TAB 1: Config -->
     <div class="tab-content active" id="tab-config">
-        <div class="guide-block byok1-stripe" style="margin-bottom:10px">
-            <b>BYOK #1 · Claude Opus 4 BYOK</b>
-            <div class="fg"><label>Base URL（可选）</label><input type="text" id="cfgByok1Host" value="${tmp25}" placeholder="例如 api-a.example.com"></div>
-            <div class="fg"><label>API Key</label><input type="password" id="cfgByok1Key" value="${tmp26}" placeholder="BYOK #1 API Key" autocomplete="off"></div>
-            <div class="btns" style="margin-bottom:6px">
-                <button type="button" class="btn btn-s sm" data-ws-action="importExternalConfig" data-ws-source="claude" data-ws-slot="1">导入 Claude 配置</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="importExternalConfig" data-ws-source="codex" data-ws-slot="1">导入 GPT 配置</button>
+        <div class="guide-block" style="margin-bottom:10px">
+            <div class="card-head between" style="margin-bottom:8px;padding:0">
+                <b>网关管理</b>
+                <button type="button" class="btn btn-s sm" data-ws-action="showAddGatewayForm">+ 添加</button>
             </div>
-            <div class="row" style="gap:6px;margin-bottom:6px">
-                <select id="cfgByok1Model" style="flex:1;font-size:12px;padding:5px 8px">${tmp27 ? `<option value="${tmp27}" selected>${tmp27}</option>` : "<option value=\"\" disabled selected>请先加载模型</option>"}</select>
-                <button type="button" class="btn btn-s sm" data-ws-action="fetchModels" data-ws-slot="1" style="padding:4px 8px">加载模型</button>
+            <div id="addGatewayForm" class="hidden" style="border:1px solid ${tmp21};border-radius:4px;padding:8px;margin-bottom:8px;background:rgba(255,255,255,0.01)">
+                <div class="fg"><label>网关名称</label><input type="text" id="newGatewayName" placeholder="例如 OpenAI Official"></div>
+                <div class="fg"><label>Base URL</label><input type="text" id="newGatewayBaseUrl" placeholder="例如 api.openai.com"></div>
+                <div class="fg"><label>API Key</label><input type="password" id="newGatewayApiKey" placeholder="sk-..." autocomplete="off"></div>
+                <div class="btns">
+                    <button type="button" class="btn btn-p sm" data-ws-action="addGateway">添加网关</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="cancelAddGateway">取消</button>
+                </div>
             </div>
-            <div class="fg" id="cfgByok1ThinkingEffortRow"><label id="cfgByok1ThinkingLabel">${esc(thinkingEffort_1.getThinkingIntensityHint(thinkingEffort_1.detectModelProvider(tmp27)))}</label><select id="cfgByok1ThinkingEffort">${buildThinkingEffortOptions(tmp27, tmp31)}</select></div>
-            <div class="fg hidden" id="cfgByok1ReasoningModeRow"><label>GPT-5.6 Reasoning Mode</label><select id="cfgByok1ReasoningMode">${buildOpenAIReasoningModeOptions(tmp44)}</select></div>
-            <div class="fg" id="cfgByok1ServiceTierRow"><label>GPT Processing Tier</label><select id="cfgByok1ServiceTier">${buildOpenAIServiceTierOptions(tmp40)}</select></div>
-            <div id="modelFetchStatus1" style="font-size:10px;color:${tmp17}"></div>
+            <div id="gatewayList"></div>
         </div>
-        <div class="guide-block byok2-stripe" style="margin-bottom:10px">
-            <b>BYOK #2 · Claude Opus 4 Thinking BYOK</b>
-            <div class="fg"><label>Base URL（可选）</label><input type="text" id="cfgByok2Host" value="${tmp28}" placeholder="例如 api-b.example.com"></div>
-            <div class="fg"><label>API Key</label><input type="password" id="cfgByok2Key" value="${tmp29}" placeholder="BYOK #2 API Key" autocomplete="off"></div>
-            <div class="btns" style="margin-bottom:6px">
-                <button type="button" class="btn btn-s sm" data-ws-action="importExternalConfig" data-ws-source="claude" data-ws-slot="2">导入 Claude 配置</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="importExternalConfig" data-ws-source="codex" data-ws-slot="2">导入 GPT 配置</button>
+        
+        <div class="guide-block" id="multiModelSelectionPanel" style="margin-bottom:10px;display:none">
+            <b>模型选择</b>
+            <div class="fg">
+                <label>主模型 (BYOK1)</label>
+                <select id="cfgMultiPrimaryModel" style="width:100%;font-size:12px;padding:5px 8px">
+                    <option value="" disabled selected>请先添加网关并获取模型</option>
+                </select>
             </div>
-            <div class="row" style="gap:6px;margin-bottom:6px">
-                <select id="cfgByok2Model" style="flex:1;font-size:12px;padding:5px 8px">${tmp30 ? `<option value="${tmp30}" selected>${tmp30}</option>` : "<option value=\"\" disabled selected>请先加载模型</option>"}</select>
-                <button type="button" class="btn btn-s sm" data-ws-action="fetchModels" data-ws-slot="2" style="padding:4px 8px">加载模型</button>
+            <div class="fg" id="cfgMultiPrimaryThinkingEffortRow">
+                <label id="cfgMultiPrimaryThinkingLabel">思考强度</label>
+                <select id="cfgMultiPrimaryThinkingEffort">
+                    <option value="">关闭</option>
+                </select>
             </div>
-            <div class="fg" id="cfgByok2ThinkingEffortRow"><label id="cfgByok2ThinkingLabel">${esc(thinkingEffort_1.getThinkingIntensityHint(thinkingEffort_1.detectModelProvider(tmp30)))}</label><select id="cfgByok2ThinkingEffort">${buildThinkingEffortOptions(tmp30, tmp32)}</select></div>
-            <div class="fg hidden" id="cfgByok2ReasoningModeRow"><label>GPT-5.6 Reasoning Mode</label><select id="cfgByok2ReasoningMode">${buildOpenAIReasoningModeOptions(tmp45)}</select></div>
-            <div class="fg" id="cfgByok2ServiceTierRow"><label>GPT Processing Tier</label><select id="cfgByok2ServiceTier">${buildOpenAIServiceTierOptions(tmp41)}</select></div>
-            <div id="modelFetchStatus2" style="font-size:10px;color:${tmp17}"></div>
+            <div class="fg" style="margin-top:10px">
+                <label>思考模型 (BYOK2)</label>
+                <select id="cfgMultiThinkingModel" style="width:100%;font-size:12px;padding:5px 8px">
+                    <option value="" disabled selected>请先添加网关并获取模型</option>
+                </select>
+            </div>
+            <div class="fg" id="cfgMultiThinkingEffortRow">
+                <label id="cfgMultiThinkingLabel">思考强度</label>
+                <select id="cfgMultiThinkingEffort">
+                    <option value="">关闭</option>
+                </select>
+            </div>
+            <button type="button" class="btn btn-p" data-ws-action="saveMultiGatewayConfig" style="width:100%">保存配置</button>
         </div>
+        
         <div class="guide-block" style="margin-bottom:10px">
             <div class="card-head between" style="margin-bottom:8px;padding:0">
                 <span>系统提示词覆盖</span>
@@ -2978,6 +3216,22 @@ input:focus, select:focus {
 
     <!-- TAB 2: Control -->
     <div class="tab-content" id="tab-control">
+        <div class="card" style="margin-bottom:12px">
+            <div class="card-head">当前激活模型</div>
+            <div style="padding:8px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                    <span style="font-size:11px;color:${tmp16}">主模型 (BYOK1)</span>
+                    <span style="font-family:${tmp24};font-size:12px;color:${tmp15}">${simplePrimaryModel || "未配置"}</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                    <span style="font-size:11px;color:${tmp16}">思考模型 (BYOK2)</span>
+                    <span style="font-family:${tmp24};font-size:12px;color:${tmp15}">${simpleThinkingModel || "未配置"}</span>
+                </div>
+                <div style="font-size:10px;color:${tmp16};margin-top:4px">
+                    你可以在 Devin 中把两个入口分别理解为主模型和思考模型
+                </div>
+            </div>
+        </div>
         <div class="row" style="gap:6px;margin-bottom:12px">
             <div class="fg" style="flex:1;margin-bottom:0">
                 <label>Hybrid 端口</label>

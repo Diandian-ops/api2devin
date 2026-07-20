@@ -1,31 +1,34 @@
-# Devin BYOK Bridge
+# API2Devin
+
+> **项目说明**  
+> 本项目 Fork 自 [ycx932436/devin-byok-bridge](https://github.com/ycx932436/devin-byok-bridge)，遵循原项目的 MIT 开源协议。  
+> 感谢原作者 [@ycx932436](https://github.com/ycx932436) 的优秀工作。
 
 > **非官方社区工具** — 与 Devin Desktop（原 Windsurf）、Codeium / Cognition 无隶属或授权关系。使用前请阅读 [DISCLAIMER.md](DISCLAIMER.md)、[SECURITY.md](SECURITY.md) 与 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 Devin Desktop BYOK 桥接插件 — 使用自己的 API Key 连接 Claude / GPT / Gemini 模型。
 
-> **更名说明：** 2026 年 6 月起 Windsurf 已更名为 [Devin Desktop](https://devin.ai/desktop/)。本项目同步更名为 **Devin BYOK Bridge**，并保留对旧版 Windsurf 安装路径的兼容。
-
 **设计定位：** 仅在本机运行（默认 `127.0.0.1`），代理与配置由用户自行管理，**不面向公网或多用户部署**。
 
-- 插件 ID：`devin-byok-bridge`
-- 显示名：Devin BYOK Bridge
-- 维护者 / Publisher：`ycx932436`
-- 版本：2.6.1
-- 仓库：https://github.com/ycx932436/devin-byok-bridge
+- 插件 ID：`api2devin`
+- 显示名：API2Devin
+- 维护者：`Diandian-ops`
+- 版本：2.6.2
+- 原项目：https://github.com/ycx932436/devin-byok-bridge
+- 本仓库：https://github.com/Diandian-ops/api2devin
 
 ## 安装
 
 在 Devin Desktop / VS Code 中：
 
 1. `Ctrl+Shift+P` → **Extensions: Install Extension from Location...**
-2. 克隆或下载本仓库，选择仓库根目录（`devin-byok-bridge/`）
+2. 克隆或下载本仓库，选择仓库根目录（`api2devin/`）
 
 若已打包 VSIX，也可使用 **Install from VSIX...**（请使用本仓库构建的 VSIX，**勿**将含本地配置的 VSIX 提交到 Git）。
 
 ## 快速开始
 
-1. 点击左侧 **Devin BYOK Bridge** 图标打开控制面板
+1. 点击左侧 **API2Devin** 图标打开控制面板
 2. 在 **BYOK #1** 和 **BYOK #2** 分别填写 Base URL（可选）、API Key，或点击 **导入 Claude 配置** / **导入 GPT 配置** 读取 `~/.claude` / `~/.codex` 用户配置
 3. 各自点击 **加载模型**，选择模型；导入配置会自动保存并尝试加载模型；Claude / GPT / Gemini 会显示对应厂商的思考强度选项
 4. 点击 **一键启动**
@@ -86,12 +89,12 @@ Devin Desktop BYOK 桥接插件 — 使用自己的 API Key 连接 Claude / GPT 
 
 聊天请求**仅当**在 Devin Desktop 中选择 `Claude Opus 4 BYOK` 或 `Claude Opus 4 Thinking BYOK` 时，才会走本地代理并读取对应 BYOK 槽位的 Host / Key / 模型 / 思考强度。其他官方模型、搜索、Embeddings、代码补全等请求会透传到 Cognition / Codeium 官方上游。
 
-若网关明确只支持传统 Chat Completions，可在侧栏 **高级路由** 中将 OpenAI API Path 改为 `/v1/chat/completions`，避免先探测 `/v1/responses`。代理会按网关能力缓存短期记忆回退结果，减少重复 500。
+若网关明确只支持传统 Chat Completions，代理会自动检测并回退到 `/v1/chat/completions`，无需手动配置。
 
 ## 目录结构
 
 ```
-devin-byok-bridge/
+api2devin/
 ├── package.json
 ├── extension.js              # 扩展入口
 ├── integrity.js              # 设备 ID / 版本
@@ -241,7 +244,7 @@ BYOK 聊天会把 Devin 发来的 **system + tools + 全量 history** 转发到�
 
 **Bedrock 报 `signature: Field required`**：通常是历史消息里有无签名 thinking。默认代理会剔除无签名 thinking；仍失败时请新开对话或关闭 BYOK #2 思考强度。
 
-**GPT 报 `convert_request_failed` / `not implemented`**：通常是网关不支持 `/v1/responses`。代理会自动回退 `/v1/chat/completions`；若仍失败，请在高级路由中手动设置 OpenAI API Path。
+**GPT 报 `convert_request_failed` / `not implemented`**：通常是网关不支持 `/v1/responses`。代理会自动回退 `/v1/chat/completions`。
 
 **从旧版迁移**：插件 ID 已从 `windsurf-byok-bridge` 改为 `devin-byok-bridge`；本地配置会自动迁移，补丁备份优先使用 `.devin-bak`，仍兼容 `.windsurf-bak`。
 
@@ -265,10 +268,10 @@ BYOK 聊天会把 Devin 发来的 **system + tools + 全量 history** 转发到�
 
 ### 非官方项目
 
-- 本项目为**社区开源工具**，由 [`ycx932436`](https://github.com/ycx932436) 维护。
+- 本项目为**社区开源工具**，基于 [`ycx932436`](https://github.com/ycx932436) 的原项目 Fork 而来，当前由 [`Diandian-ops`](https://github.com/Diandian-ops) 维护。
 - **与 Devin Desktop、Cognition、Codeium、Exafunction 及其关联方无任何隶属、授权或背书关系。**
 - 名称中的 “Devin”“Windsurf” 等字样**仅用于说明兼容目标或历史名称**，不代表官方产品或扩展。
-- 安全问题请通过 [GitHub Security Advisories](https://github.com/ycx932436/devin-byok-bridge/security/advisories) 或 [Issues](https://github.com/ycx932436/devin-byok-bridge/issues) 报告，详见 [SECURITY.md](SECURITY.md)。
+- 安全问题请通过 [GitHub Security Advisories](https://github.com/Diandian-ops/api2devin/security/advisories) 或 [Issues](https://github.com/Diandian-ops/api2devin/issues) 报告，详见 [SECURITY.md](SECURITY.md)。
 
 ### 服务条款与合规
 
