@@ -2005,6 +2005,25 @@ class SidebarProvider {
           this.refresh();
           break;
         }
+      case "editGateway":
+        {
+          const gatewayId = String(tmp02.gatewayId || "").trim();
+          const name = String(tmp02.name || "").trim();
+          const baseUrl = String(tmp02.baseUrl || "").trim();
+          const apiKey = String(tmp02.apiKey || "").trim();
+          if (!gatewayId || !name || !baseUrl || !apiKey) {
+            this.postActionState("config", "error", "请填写完整的网关信息");
+            break;
+          }
+          if (this.updateGateway(gatewayId, { name: name, baseUrl: baseUrl, apiKey: apiKey })) {
+            this.view?.webview.postMessage({ type: "gatewayUpdated", gatewayId: gatewayId });
+            this.postActionState("config", "success", "网关已更新");
+            this.refresh();
+          } else {
+            this.postActionState("config", "error", "网关更新失败");
+          }
+          break;
+        }
       case "deleteGateway":
         {
           const gatewayId = String(tmp02.gatewayId || "").trim();

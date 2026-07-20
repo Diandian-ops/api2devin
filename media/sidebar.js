@@ -30,7 +30,10 @@
       return `<div class="guide-block" style="margin-bottom:8px;padding:8px;border-left:3px solid #0ea5e9">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <b style="font-size:12px">${fn6(gw.name)}</b>
-          <button type="button" class="btn btn-s sm" data-ws-action="deleteGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">删除</button>
+          <div style="display:flex;gap:4px">
+            <button type="button" class="btn btn-s sm" data-ws-action="editGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">编辑</button>
+            <button type="button" class="btn btn-s sm" data-ws-action="deleteGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">删除</button>
+          </div>
         </div>
         <div style="font-size:10px;color:#888;margin-bottom:4px">${fn6(gw.baseUrl)}</div>
         <div style="font-size:10px;color:#888;margin-bottom:6px">模型: ${hasModels ? modelCount + ' 个' : '未加载'}</div>
@@ -938,12 +941,33 @@
         fn7("config", "error", "请填写完整网关信息");
         return;
       }
-      fn7("config", "busy", "正在添加网关...");
-      fn5("addGateway", { name: name, baseUrl: baseUrl, apiKey: apiKey });
+      const editingId = tmp22.getAttribute("data-editing-id");
+      if (editingId) {
+        fn7("config", "busy", "正在保存修改...");
+        fn5("editGateway", { gatewayId: editingId, name: name, baseUrl: baseUrl, apiKey: apiKey });
+        tmp22.textContent = "添加网关";
+        tmp22.removeAttribute("data-editing-id");
+      } else {
+        fn7("config", "busy", "正在添加网关...");
+        fn5("addGateway", { name: name, baseUrl: baseUrl, apiKey: apiKey });
+      }
       fn4("newGatewayName").value = "";
       fn4("newGatewayBaseUrl").value = "";
       fn4("newGatewayApiKey").value = "";
       fn4("addGatewayForm").classList.add("hidden");
+    } else if (tmp32 === "editGateway") {
+      const gatewayId = tmp22.getAttribute("data-gateway-id");
+      const gateway = gatewayConfig.gateways.find(g => g.id === gatewayId);
+      if (!gateway) return;
+      fn4("newGatewayName").value = gateway.name;
+      fn4("newGatewayBaseUrl").value = gateway.baseUrl;
+      fn4("newGatewayApiKey").value = gateway.apiKey || "";
+      fn4("addGatewayForm").classList.remove("hidden");
+      const addBtn = document.querySelector('[data-ws-action="addGateway"]');
+      if (addBtn) {
+        addBtn.textContent = "保存修改";
+        addBtn.setAttribute("data-editing-id", gatewayId);
+      }
     } else if (tmp32 === "deleteGateway") {
       const gatewayId = tmp22.getAttribute("data-gateway-id");
       if (confirm("确定要删除该网关吗？")) {
