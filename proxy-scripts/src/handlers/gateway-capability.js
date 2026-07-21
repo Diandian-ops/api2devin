@@ -17,9 +17,10 @@ export function buildGatewayCapabilityKey({
   port,
   apiPath,
   providerKind,
+  model,
   slot
 }) {
-  return [protocol, host, port, apiPath, providerKind, slot].map(normalizePart).join("|");
+  return [protocol, host, port, apiPath, providerKind, model, slot].map(normalizePart).join("|");
 }
 
 export function getGatewayCapability(key, now = Date.now()) {

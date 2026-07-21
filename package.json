@@ -2,7 +2,7 @@
   "name": "api2devin",
   "displayName": "API2Devin",
   "description": "API2Devin - Devin Desktop BYOK 桥接，基于 ycx932436/devin-byok-bridge Fork",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "publisher": "Diandian-ops",
   "license": "MIT",
   "scripts": {

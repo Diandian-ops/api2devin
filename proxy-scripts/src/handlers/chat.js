@@ -35,6 +35,15 @@ function proxyHeaders(arg0, arg1) {
     "x-proxy-requested-model": arg0 || ""
   };
 }
+export function gatewayAuthHeaders(arg0, arg1 = "", arg2 = "anthropic") {
+  const tmp1 = String(arg0 || "");
+  const tmp2 = String(arg1 || "").trim().toLowerCase();
+  const tmp3 = tmp2 || (arg2 === "openai" ? "bearer" : "x-api-key");
+  return {
+    ...(tmp3 === "both" || tmp3 === "x-api-key" ? { "x-api-key": tmp1 } : {}),
+    ...(tmp3 === "both" || tmp3 === "bearer" ? { authorization: "Bearer " + tmp1 } : {})
+  };
+}
 const _ENV_DEFAULT_MODEL = process.env.DEFAULT_MODEL || "";
 const _ENV_MAX_TOKENS = parseInt(process.env.MAX_TOKENS || "32768", 10);
 function getDefaultModel() {
@@ -132,9 +141,9 @@ function logNoToolsCalled(arg0, arg1, arg2) {
 export function sanitizeLogBody(arg0) {
   return String(arg0 || "").slice(0, 500).replace(/"((?:api[_-]?key|token|secret|password|authorization))"\s*:\s*"[^"]{6,}"/gi, "\"$1\":\"[REDACTED]\"").replace(/(?:sk-[a-zA-Z0-9_-]{10,}|Bearer\s+[^\s",}]+)/g, "[REDACTED]").replace(/(?:key-[a-zA-Z0-9_-]{10,})/g, "[REDACTED]");
 }
-function buildProviderErrorMessage(arg0, arg1, arg2) {
+export function buildProviderErrorMessage(arg0, arg1, arg2) {
   const tmp3 = String(arg2 || "").toLowerCase();
-  if (/convert_request_failed|not implemented|not_implemented|new_api_error|responses api|invalid.*responses/.test(tmp3)) {
+  if (arg0 === "OpenAI" && /convert_request_failed|not implemented|not_implemented|new_api_error|responses api|invalid.*responses/.test(tmp3)) {
     return "[" + arg0 + " Error " + arg1 + "] 当前网关不支持 OpenAI Responses API，代理会自动回退到 /v1/chat/completions。";
   }
   if (/signature.*field required|field required.*signature|validationexception/.test(tmp3) && tmp3.includes("signature")) {
@@ -153,7 +162,10 @@ function buildProviderErrorMessage(arg0, arg1, arg2) {
     return "[" + arg0 + " Error 503] 当前模型池暂无可用资源或上游过载，请切换到 Sonnet/默认模型后重试。";
   }
   if (arg1 === 403 && tmp3.includes("/v1/messages")) {
-    return "[" + arg0 + " Error 403] 当前分组不允许 /v1/messages 通道，请切换 OpenAI 兼容模型或使用支持 Anthropic Messages 的分组。";
+    if (arg0 === "Anthropic") {
+      return "[Anthropic Error 403] 当前网关拒绝 Anthropic Messages（/v1/messages）通道。代理已按 Claude 模型选择该通道，请确认该网关支持 Anthropic Messages，或切换支持 Claude Messages 的网关。";
+    }
+    return "[" + arg0 + " Error 403] 当前分组不允许 /v1/messages 通道，请使用支持 Anthropic Messages 的分组。";
   }
   return "[" + arg0 + " Error " + arg1 + "]";
 }
@@ -243,35 +255,28 @@ function resolveSlotThinkingEffort(arg0, arg1) {
   }
   return arg1.openaiReasoningEffort || "";
 }
-function buildThinkingOptions(arg0, arg1, tmp2 = null) {
+export function buildThinkingOptions(arg0, arg1, tmp2 = null) {
   const tmp3 = getRuntimeConfig();
-  const tmp4 = isThinkingModel(arg0);
-  const tmp5 = resolveSlotThinkingEffort(tmp2, tmp3);
-  const tmp6 = isClaudeModel(arg0);
-  const tmp7 = isGeminiModel(arg0);
-  const tmp8 = isOpenAIModel(arg0);
-  const tmp12 = tmp2 === 1 || tmp2 === 2 ? getSlotReasoningMode(tmp2) : tmp3.openaiReasoningMode || "";
-  let tmp9 = false;
-  let tmp10 = "";
-  if (arg1 || tmp8) {
-    tmp9 = tmp4 || tmp3.openaiThinkingEnabled === true || !!tmp5 || !!tmp12;
-    tmp10 = tmp9 ? tmp5 || tmp3.openaiReasoningEffort || "" : "";
-  } else if (tmp7) {
-    tmp9 = !!sanitizeGeminiThinkingEffort(tmp5) || tmp4 || tmp2 === 2;
-    tmp10 = sanitizeGeminiThinkingEffort(tmp5) || (tmp9 && (tmp2 === 2 || tmp4) ? "medium" : "");
-  } else if (tmp6) {
-    tmp9 = !!tmp5 || tmp4 || tmp2 === 2;
-    tmp10 = tmp9 ? tmp5 || (tmp2 === 2 || tmp4 ? "medium" : "") : "";
-  } else {
-    tmp9 = tmp4;
-    tmp10 = "";
+  if (tmp3.customThinkingEnabled !== true) {
+    return {
+      thinkingEnabled: false,
+      reasoningEffort: "",
+      reasoningMode: "",
+      thinkingBudget: 0,
+      provider: detectModelProvider(arg0) || "claude"
+    };
   }
+  const tmp5 = resolveSlotThinkingEffort(tmp2, tmp3);
+  const tmp7 = isGeminiModel(arg0);
+  const tmp12 = tmp2 === 1 || tmp2 === 2 ? getSlotReasoningMode(tmp2) : tmp3.openaiReasoningMode || "";
+  const tmp10 = tmp7 ? sanitizeGeminiThinkingEffort(tmp5) : tmp5;
+  const tmp9 = !!tmp10;
   const tmp11 = {
     thinkingEnabled: tmp9,
     reasoningEffort: tmp10,
-    reasoningMode: tmp12,
+    reasoningMode: tmp9 ? tmp12 : "",
     thinkingBudget: tmp9 ? (tmp7 ? usesGeminiThinkingLevel(arg0) ? 0 : thinkingEffortToGeminiBudget(tmp10) : thinkingEffortToAnthropicBudget(tmp10)) || (tmp7 ? 8192 : 10000) : 0,
-    provider: tmp7 ? "gemini" : tmp8 || arg1 ? "gpt" : tmp6 ? "claude" : detectModelProvider(arg0) || "claude"
+    provider: tmp7 ? "gemini" : isOpenAIModel(arg0) || arg1 ? "gpt" : isClaudeModel(arg0) ? "claude" : detectModelProvider(arg0) || "claude"
   };
   return tmp11;
 }
@@ -596,12 +601,12 @@ export function toInjectedTailMessage(arg0) {
   };
 }
 
-function shouldRetryWithoutGeminiThinking(arg0, arg1) {
+export function shouldRetryWithoutThinking(arg0, arg1) {
   if (![400, 422, 500, 501, 502].includes(arg0)) {
     return false;
   }
   const tmp1 = String(arg1 || "").toLowerCase();
-  return /thinking_config|thinking.*unsupported|extra_body|unknown.*thinking|invalid.*thinking|unsupported.*field|unrecognized.*field|additional properties/.test(tmp1);
+  return /thinking_config|budget_tokens|output_config\.effort|reasoning[_\s.]effort|thinking.*(?:unsupported|not supported|invalid)|unknown.*(?:thinking|reasoning)|invalid.*(?:thinking|reasoning)|unsupported.*(?:thinking|reasoning|field)|unrecognized.*(?:thinking|reasoning|field)|additional properties/.test(tmp1);
 }
 function countInjectedTailMessages(messages = []) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -714,7 +719,8 @@ export function buildOpenAIResponsesBody({
   serviceTier: tmp7,
   thinkingOptions: tmp12,
   initiator: tmp9,
-  forwardTools: tmp16
+  forwardTools: tmp16,
+  omitThinking: tmp18 = false
 }) {
   const tmp15 = toOpenAIMessages(tmp2, tmp3);
   const tmp17 = tmp16 ? getForwardedToolChoice(tmp4, tmp5, "OpenAI") : undefined;
@@ -727,7 +733,7 @@ export function buildOpenAIResponsesBody({
   if (tmp20 > 0) {
     tmp19.max_output_tokens = tmp20;
   }
-  const tmp21 = tmp12?.thinkingEnabled === true;
+  const tmp21 = tmp12?.thinkingEnabled === true && !tmp18;
   if (OPENAI_ENABLE_REASONING && tmp21) {
     if (isGeminiModel(tmp6)) {
       const tmp02 = buildGeminiThinkingPayload(tmp6, tmp12?.reasoningEffort);
@@ -791,7 +797,8 @@ export function buildOpenAIChatCompletionsBody({
   serviceTier: tmp7,
   thinkingOptions: tmp12,
   forwardTools: tmp16,
-  omitGeminiThinking: tmp18 = false
+  omitGeminiThinking: tmp18 = false,
+  omitThinking: tmp22 = false
 }) {
   const tmp17 = tmp16 ? getForwardedToolChoice(tmp4, tmp5, "OpenAI") : undefined;
   const tmp19 = {
@@ -806,7 +813,7 @@ export function buildOpenAIChatCompletionsBody({
   if (tmp7) {
     tmp19.service_tier = tmp7;
   }
-  const tmp21 = tmp12?.thinkingEnabled === true;
+  const tmp21 = tmp12?.thinkingEnabled === true && !tmp22;
   if (OPENAI_ENABLE_REASONING && tmp21) {
     if (isGeminiModel(tmp6)) {
       if (!tmp18) {
@@ -978,12 +985,15 @@ function streamAnthropic(arg0, arg1, {
     port: tmp20,
     apiPath: tmp12.apiPath,
     providerKind: "anthropic",
+    model: tmp6,
     slot: tmp11 || "default"
   });
   const tmp42 = getGatewayCapability(tmp41);
   const tmp43Base = getPromptCacheConfig();
   let tmp43 = tmp43Base.anthropic && !tmp42?.promptCacheUnsupported;
   let tmp44 = false;
+  let tmp45 = tmp10?.thinkingEnabled === true && !tmp42?.thinkingUnsupported;
+  let tmp46 = false;
   const buildPayload = () => {
     const tmp14 = {
       model: tmp6,
@@ -998,7 +1008,7 @@ function streamAnthropic(arg0, arg1, {
         tmp14.tool_choice = tmp13;
       }
     }
-    if (tmp10?.thinkingEnabled) {
+    if (tmp45) {
       const tmp02 = buildAnthropicThinkingPayload(tmp6, tmp10.reasoningEffort, "medium");
       if (tmp02?.thinking) {
         tmp14.thinking = tmp02.thinking;
@@ -1046,7 +1056,7 @@ function streamAnthropic(arg0, arg1, {
         ...(tmp43 ? {
           "anthropic-beta": "prompt-caching-2024-07-31"
         } : {}),
-        "x-api-key": tmp12.apiKey,
+        ...gatewayAuthHeaders(tmp12.apiKey, tmp12.authMode, "anthropic"),
         "content-length": Buffer.byteLength(tmp16),
         ...proxyHeaders(tmp6, Buffer.byteLength(tmp16))
       }
@@ -1070,6 +1080,17 @@ function streamAnthropic(arg0, arg1, {
               reason: "prompt cache rejected: HTTP " + arg02.statusCode
             });
             console.log("  ↩️  Anthropic prompt cache unsupported — retrying without cache_control");
+            sendAnthropicRequest();
+            return;
+          }
+          if (tmp45 && !tmp46 && shouldRetryWithoutThinking(arg02.statusCode, tmp02)) {
+            tmp45 = false;
+            tmp46 = true;
+            markGatewayCapability(tmp41, {
+              thinkingUnsupported: true,
+              reason: "thinking parameters rejected: HTTP " + arg02.statusCode
+            });
+            console.log("  ↩️  Anthropic-compatible gateway rejected thinking parameters — retrying without custom thinking");
             sendAnthropicRequest();
             return;
           }
@@ -1113,7 +1134,7 @@ function streamAnthropic(arg0, arg1, {
           requestBytes: tmp16 ? Buffer.byteLength(tmp16) : 0,
           promptCacheEnabled: tmp43,
           promptCacheRejected: tmp44,
-          fallback: tmp44 ? "no-cache-retry" : ""
+          fallback: [tmp44 ? "no-cache-retry" : "", tmp46 ? "omit-thinking" : ""].filter(Boolean).join(",")
         });
         tmp18.finalize(message);
       };
@@ -1232,13 +1253,6 @@ function streamOpenAI(arg0, arg1, {
     initiator: tmp9,
     forwardTools: tmp16
   };
-  const tmp31 = buildOpenAIResponsesBody(tmp30);
-  const tmp32 = buildOpenAIChatCompletionsBody(tmp30);
-  const tmp36 = isGeminiModel(tmp6) && tmp12?.thinkingEnabled === true ? buildOpenAIChatCompletionsBody({
-    ...tmp30,
-    omitGeminiThinking: true
-  }) : null;
-  console.log("  🧩 OpenAI/Sub2API reasoning: " + (isGeminiModel(tmp6) ? tmp31.thinking_config ? usesGeminiThinkingLevel(tmp6) ? "gemini level=" + (tmp31.thinking_config.thinking_level || "?") : "gemini budget=" + (tmp31.thinking_config.thinking_budget || "?") : "off" : tmp31.reasoning ? tmp31.reasoning.effort || "default" : tmp32.reasoning_effort || "off"));
   if (tmp16 && forwardedTools && forwardedTools.length > 0) {
     console.log("  🔧 OpenAI tools enabled: " + forwardedTools.length + describeToolFilter(tmp4, forwardedTools) + " (initiator=" + (tmp9 || "unknown") + ") " + formatToolNameList(forwardedTools));
   } else if (tmp4 && tmp4.length > 0) {
@@ -1253,9 +1267,34 @@ function streamOpenAI(arg0, arg1, {
     port: tmp38,
     apiPath: tmp14.apiPath || "/v1/responses",
     providerKind: isGeminiModel(tmp6) ? "gemini" : "openai",
+    model: tmp6,
     slot: tmp13 || "default"
   });
   const tmp40 = getGatewayCapability(tmp39);
+  let tmp45 = tmp12?.thinkingEnabled === true && !tmp40?.thinkingUnsupported;
+  const tmp46 = tmp45 ? tmp12 : {
+    ...tmp12,
+    thinkingEnabled: false,
+    reasoningEffort: "",
+    reasoningMode: ""
+  };
+  const tmp31 = buildOpenAIResponsesBody({
+    ...tmp30,
+    thinkingOptions: tmp46
+  });
+  const tmp32 = buildOpenAIChatCompletionsBody({
+    ...tmp30,
+    thinkingOptions: tmp46
+  });
+  const tmp36 = tmp45 ? buildOpenAIChatCompletionsBody({
+    ...tmp30,
+    omitThinking: true
+  }) : null;
+  const tmp47 = tmp45 ? buildOpenAIResponsesBody({
+    ...tmp30,
+    omitThinking: true
+  }) : null;
+  console.log("  🧩 OpenAI/Sub2API reasoning: " + (isGeminiModel(tmp6) ? tmp31.thinking_config ? usesGeminiThinkingLevel(tmp6) ? "gemini level=" + (tmp31.thinking_config.thinking_level || "?") : "gemini budget=" + (tmp31.thinking_config.thinking_budget || "?") : "off" : tmp31.reasoning ? tmp31.reasoning.effort || "default" : tmp32.reasoning_effort || "off"));
   const tmp41 = shouldOptimizeOpenAIPrefix({
     config: tmp15
   });
@@ -1275,6 +1314,7 @@ function streamOpenAI(arg0, arg1, {
       path: toChatCompletionsPath(tmp14.apiPath),
       body: tmp32,
       mode: "chat",
+      withoutThinking: !tmp45,
       cacheKey: tmp39,
       usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "responses-already-disabled")
     });
@@ -1283,9 +1323,9 @@ function streamOpenAI(arg0, arg1, {
         path: toChatCompletionsPath(tmp14.apiPath),
         body: tmp36,
         mode: "chat",
-        withoutGeminiThinking: true,
+        withoutThinking: true,
         cacheKey: tmp39,
-        usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "omit-gemini-thinking")
+        usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "omit-thinking")
       });
     }
   } else if (isResponsesApiPath(tmp14.apiPath)) {
@@ -1293,6 +1333,7 @@ function streamOpenAI(arg0, arg1, {
       path: tmp14.apiPath,
       body: tmp31,
       mode: "responses",
+      withoutThinking: !tmp45,
       cacheKey: tmp39,
       usageMeta: buildOpenAIUsageMeta("responses", tmp14.apiPath)
     });
@@ -1300,17 +1341,28 @@ function streamOpenAI(arg0, arg1, {
       path: toChatCompletionsPath(tmp14.apiPath),
       body: tmp32,
       mode: "chat",
+      withoutThinking: !tmp45,
       cacheKey: tmp39,
       usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "responses-to-chat")
     });
+    if (tmp47) {
+      tmp33.push({
+        path: tmp14.apiPath,
+        body: tmp47,
+        mode: "responses",
+        withoutThinking: true,
+        cacheKey: tmp39,
+        usageMeta: buildOpenAIUsageMeta("responses", tmp14.apiPath, "omit-thinking")
+      });
+    }
     if (tmp36) {
       tmp33.push({
         path: toChatCompletionsPath(tmp14.apiPath),
         body: tmp36,
         mode: "chat",
-        withoutGeminiThinking: true,
+        withoutThinking: true,
         cacheKey: tmp39,
-        usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "omit-gemini-thinking")
+        usageMeta: buildOpenAIUsageMeta("chat", toChatCompletionsPath(tmp14.apiPath), "omit-thinking")
       });
     }
   } else {
@@ -1322,6 +1374,7 @@ function streamOpenAI(arg0, arg1, {
       path: tmp14.apiPath || "/v1/chat/completions",
       body: tmp32,
       mode: "chat",
+      withoutThinking: !tmp45,
       cacheKey: tmp39,
       usageMeta: buildOpenAIUsageMeta("chat", tmp14.apiPath || "/v1/chat/completions")
     });
@@ -1330,9 +1383,9 @@ function streamOpenAI(arg0, arg1, {
         path: tmp14.apiPath || "/v1/chat/completions",
         body: tmp36,
         mode: "chat",
-        withoutGeminiThinking: true,
+        withoutThinking: true,
         cacheKey: tmp39,
-        usageMeta: buildOpenAIUsageMeta("chat", tmp14.apiPath || "/v1/chat/completions", "omit-gemini-thinking")
+        usageMeta: buildOpenAIUsageMeta("chat", tmp14.apiPath || "/v1/chat/completions", "omit-thinking")
       });
     }
   }
@@ -1359,7 +1412,7 @@ function streamOpenAI(arg0, arg1, {
       tmp24.fail(tmp35 || "[OpenAI Error]");
       return;
     }
-    if (tmp02.mode === "chat" && tmp33.length > 1 && tmp34 > 1) {
+    if (tmp02.mode === "chat" && String(tmp02.usageMeta?.fallback || "").startsWith("responses")) {
       console.log("  ↩️  OpenAI gateway rejected /v1/responses — falling back to /v1/chat/completions");
     }
     processor = tmp02.mode === "chat" ? new ChatCompletionsStreamProcessor(tmp8, tmp6, tmp11) : new OpenAIStreamProcessor(tmp8, tmp6, tmp11);
@@ -1387,7 +1440,7 @@ function streamOpenAI(arg0, arg1, {
       headers: {
         "content-type": "application/json",
         accept: "text/event-stream",
-        authorization: "Bearer " + tmp14.apiKey,
+        ...gatewayAuthHeaders(tmp14.apiKey, tmp14.authMode, "openai"),
         "content-length": Buffer.byteLength(tmp03),
         ...proxyHeaders(tmp6, Buffer.byteLength(tmp03))
       }
@@ -1404,16 +1457,25 @@ function streamOpenAI(arg0, arg1, {
         arg02.on("end", () => {
           console.error("  ❌ Body: " + sanitizeLogBody(tmp12));
           tmp35 = buildProviderErrorMessage("OpenAI", arg02.statusCode, tmp12);
-          if (shouldFallbackToChatCompletions(arg02.statusCode, tmp12) && tmp34 < tmp33.length) {
+          if (!tmp02.withoutThinking && tmp45 && shouldRetryWithoutThinking(arg02.statusCode, tmp12)) {
+            markGatewayCapability(tmp02.cacheKey, {
+              thinkingUnsupported: true,
+              reason: "thinking parameters rejected: HTTP " + arg02.statusCode
+            });
+            tmp45 = false;
+            const fallbackIndex = tmp33.findIndex((candidate, index) => index >= tmp34 && candidate.withoutThinking === true && candidate.path === tmp02.path);
+            if (fallbackIndex >= 0) {
+              tmp34 = fallbackIndex;
+              console.log("  ↩️  OpenAI-compatible gateway rejected thinking parameters — retrying without custom thinking");
+              fn2();
+              return;
+            }
+          }
+          if (tmp02.mode === "responses" && shouldFallbackToChatCompletions(arg02.statusCode, tmp12) && tmp34 < tmp33.length) {
             markGatewayCapability(tmp02.cacheKey, {
               preferChatCompletions: true,
               reason: "responses rejected: HTTP " + arg02.statusCode
             });
-            fn2();
-            return;
-          }
-          if (tmp02.mode === "chat" && !tmp02.withoutGeminiThinking && tmp36 && shouldRetryWithoutGeminiThinking(arg02.statusCode, tmp12) && tmp34 < tmp33.length) {
-            console.log("  ↩️  OpenAI-compatible gateway rejected Gemini thinking fields — retrying chat/completions without thinking_config");
             fn2();
             return;
           }

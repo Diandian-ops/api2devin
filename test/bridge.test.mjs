@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 
 import { sanitizeAnthropicMessages, parseGetChatMessageRequest } from "../proxy-scripts/src/handlers/parse-request.js";
 import { applySystemPromptOverride, clearSystemPromptCache } from "../proxy-scripts/src/handlers/system-prompt.js";
-import { shouldFallbackToChatCompletions, toChatCompletionsMessages, buildOpenAIResponsesBody, buildOpenAIChatCompletionsBody, requiresConfiguredDefaultModel, toInjectedTailMessage, splitSseFrames, filterForwardedTools, sanitizeLogBody } from "../proxy-scripts/src/handlers/chat.js";
-import { setRuntimeConfig, getSlotServiceTier, getSlotReasoningMode, handleConfigRequest } from "../proxy-scripts/src/handlers/models.js";
+import { shouldFallbackToChatCompletions, shouldRetryWithoutThinking, buildThinkingOptions, toChatCompletionsMessages, buildOpenAIResponsesBody, buildOpenAIChatCompletionsBody, requiresConfiguredDefaultModel, toInjectedTailMessage, splitSseFrames, filterForwardedTools, sanitizeLogBody, buildProviderErrorMessage, gatewayAuthHeaders } from "../proxy-scripts/src/handlers/chat.js";
+import { setRuntimeConfig, getSlotServiceTier, getSlotReasoningMode, getSlotThinkingEffort, handleConfigRequest } from "../proxy-scripts/src/handlers/models.js";
 import { applyAnthropicPromptCache, normalizeOpenAIPromptCacheMode, prepareToolsForPromptCache, shouldRetryWithoutPromptCache, sortToolsForStablePrefix } from "../proxy-scripts/src/handlers/prompt-cache.js";
 import { computeCacheHitRate, extractOpenAIResponsesUsage, formatUsageLog, mergeUsage } from "../proxy-scripts/src/handlers/usage-log.js";
 import { parseOpenAISSEChunk, OpenAIStreamProcessor } from "../proxy-scripts/src/handlers/openai-stream.js";
@@ -24,7 +24,9 @@ const require = createRequire(import.meta.url);
 const { readClaudeUserConfig, readCodexUserConfig } = require("../externalConfigImporter.js");
 const { PatchManager } = require("../patchManager.js");
 const gatewayUrl = require("../gatewayUrl.js");
+const { getThinkingEffortOptions, getThinkingIntensityHint } = require("../thinkingEffort.js");
 const proxyRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "proxy-scripts");
+const extensionRoot = path.dirname(proxyRoot);
 
 function httpJsonRequest(port, method, reqPath, body = null, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
@@ -196,6 +198,17 @@ test("sanitizeLogBody redacts structured secrets", () => {
   assert.match(sanitized, /"token":"\[REDACTED\]"/);
   assert.match(sanitized, /"password":"\[REDACTED\]"/);
   assert.doesNotMatch(sanitized, /1234567890abcdef|abcdefghijklmnop|secret-value/);
+});
+
+test("provider error messages keep Anthropic 403 distinct from OpenAI Responses fallback", () => {
+  const anthropic = buildProviderErrorMessage("Anthropic", 403, "responses api unsupported for /v1/messages");
+  assert.equal(anthropic.includes("OpenAI Responses API"), false);
+  assert.equal(anthropic.includes("Anthropic Messages"), true);
+  assert.equal(anthropic.includes("/v1/messages"), true);
+
+  const openai = buildProviderErrorMessage("OpenAI", 400, "responses api unsupported");
+  assert.equal(openai.includes("OpenAI Responses API"), true);
+  assert.equal(openai.includes("/v1/chat/completions"), true);
 });
 
 test("normalizeOpenAIPromptCacheMode normalizes invalid values to observe", () => {
@@ -526,6 +539,69 @@ test("GPT-5.6 mode is omitted from Chat Completions fallback", () => {
   assert.equal(chat.reasoning, undefined);
 });
 
+test("OpenAI request builders can omit custom thinking parameters for gateway fallback", () => {
+  const input = {
+    systemPrompt: "",
+    messages: [{ role: "user", content: "hello" }],
+    resolvedModel: "gpt-5.6-sol",
+    thinkingOptions: {
+      thinkingEnabled: true,
+      reasoningEffort: "high",
+      reasoningMode: "pro"
+    },
+    forwardTools: false,
+    omitThinking: true
+  };
+  const responses = buildOpenAIResponsesBody(input);
+  const chat = buildOpenAIChatCompletionsBody(input);
+
+  assert.equal(responses.reasoning, undefined);
+  assert.equal(chat.reasoning_effort, undefined);
+});
+
+test("runtime custom thinking is opt-in and clears hidden legacy efforts when disabled", () => {
+  setRuntimeConfig({
+    CUSTOM_THINKING_ENABLED: "true",
+    OPENAI_THINKING_ENABLED: "true",
+    BYOK1_THINKING_EFFORT: "high"
+  });
+  assert.equal(getSlotThinkingEffort(1), "high");
+
+  const disabled = setRuntimeConfig({
+    CUSTOM_THINKING_ENABLED: "false",
+    OPENAI_THINKING_ENABLED: "true",
+    BYOK1_THINKING_EFFORT: "max"
+  });
+  assert.equal(disabled.customThinkingEnabled, false);
+  assert.equal(disabled.openaiThinkingEnabled, false);
+  assert.equal(getSlotThinkingEffort(1), "");
+});
+
+test("custom thinking only sends parameters for an explicitly selected effort", () => {
+  setRuntimeConfig({
+    CUSTOM_THINKING_ENABLED: "true",
+    BYOK2_THINKING_EFFORT: ""
+  });
+  assert.equal(buildThinkingOptions("claude-opus-4-8-thinking", false, 2).thinkingEnabled, false);
+
+  setRuntimeConfig({
+    CUSTOM_THINKING_ENABLED: "true",
+    BYOK2_THINKING_EFFORT: "high"
+  });
+  const enabled = buildThinkingOptions("claude-opus-4-8-thinking", false, 2);
+  assert.equal(enabled.thinkingEnabled, true);
+  assert.equal(enabled.reasoningEffort, "high");
+
+  setRuntimeConfig({ CUSTOM_THINKING_ENABLED: "false" });
+});
+
+test("gateway thinking fallback only reacts to explicit parameter rejection", () => {
+  assert.equal(shouldRetryWithoutThinking(400, "unknown field reasoning_effort"), true);
+  assert.equal(shouldRetryWithoutThinking(422, "thinking_config is not supported"), true);
+  assert.equal(shouldRetryWithoutThinking(400, "invalid api key"), false);
+  assert.equal(shouldRetryWithoutThinking(401, "unknown field reasoning_effort"), false);
+});
+
 test("runtime GPT-5.6 reasoning mode is sanitized and slot-aware", () => {
   const current = setRuntimeConfig({
     OPENAI_REASONING_MODE: "PRO",
@@ -594,6 +670,20 @@ test("gateway capability cache uses detailed keys and can be cleared", () => {
   assert.equal(getGatewayCapability(key), null);
 });
 
+test("gateway capability keys isolate thinking support by model", () => {
+  const base = {
+    protocol: "https",
+    host: "api.example.com",
+    port: 443,
+    apiPath: "/v1/responses",
+    providerKind: "openai",
+    slot: 1
+  };
+  const gptKey = buildGatewayCapabilityKey({ ...base, model: "gpt-5.6-sol" });
+  const claudeKey = buildGatewayCapabilityKey({ ...base, model: "claude-opus-4-8" });
+  assert.notEqual(gptKey, claudeKey);
+});
+
 test("gateway capability cache can persist to disk", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "byok-gateway-cache-"));
   const cachePath = path.join(dir, "capabilities.json");
@@ -631,6 +721,31 @@ test("gateway URL inference preserves explicit protocol and infers local HTTP", 
   assert.equal(gatewayUrl.ensureGatewayUrl("api.example.com"), "https://api.example.com");
   assert.equal(gatewayUrl.ensureGatewayUrl("http://api.example.com:8080"), "http://api.example.com:8080");
   assert.equal(gatewayUrl.shouldUseHttpGateway("api.example.com:8080"), true);
+});
+
+test("fuzzy gateway URLs resolve model catalogs, API paths, and authentication automatically", () => {
+  const roots = [
+    "https://api.example.com",
+    "https://api.example.com/v1",
+    "https://api.example.com/v1/messages",
+    "https://api.example.com/v1/responses",
+    "https://api.example.com/v1/chat/completions"
+  ];
+  for (const value of roots) {
+    assert.equal(new URL(gatewayUrl.buildGatewayModelUrls(value)[0]).pathname, "/v1/models");
+  }
+  const prefixed = gatewayUrl.buildGatewayModelUrls("https://api.example.com/proxy/v1/messages");
+  assert.equal(new URL(prefixed[0]).pathname, "/proxy/v1/models");
+  assert.equal(gatewayUrl.deriveGatewayApiPaths("https://api.example.com", prefixed[0]).anthropicPath, "/proxy/v1/messages");
+  const unversioned = gatewayUrl.buildGatewayModelUrls("https://api.example.com/messages");
+  assert.equal(new URL(unversioned[0]).pathname, "/models");
+  assert.equal(gatewayUrl.deriveGatewayApiPaths("https://api.example.com/messages", unversioned[0]).anthropicPath, "/messages");
+  assert.deepEqual(gatewayAuthHeaders("secret", "bearer", "anthropic"), { authorization: "Bearer secret" });
+  assert.deepEqual(gatewayAuthHeaders("secret", "x-api-key", "openai"), { "x-api-key": "secret" });
+  assert.deepEqual(gatewayAuthHeaders("secret", "both", "anthropic"), { "x-api-key": "secret", authorization: "Bearer secret" });
+
+  const runtime = setRuntimeConfig({ BYOK1_GATEWAY_AUTH_MODE: "bearer" });
+  assert.equal(runtime.byok1.authMode, "bearer");
 });
 
 test("bufferedResponseHeaders strips transfer encoding and stale content length", () => {
@@ -897,6 +1012,47 @@ test("PatchManager recognizes dynamic loopback patch URLs", () => {
   assert.match(content, /127\.0\.0\.1:4444/);
   assert.equal(PatchManager.isPatched(content, rules[0], "http://127.0.0.1:3333", "http://127.0.0.1:4444"), true);
   assert.equal(PatchManager.isPatched(content, rules[2], "http://127.0.0.1:3333", "http://127.0.0.1:4444"), true);
+});
+
+test("sidebar refreshes active model labels from status snapshots", () => {
+  const providerSource = fs.readFileSync(path.join(extensionRoot, "sidebarProvider.js"), "utf8");
+  const sidebarSource = fs.readFileSync(path.join(extensionRoot, "media", "sidebar.js"), "utf8");
+
+  assert.match(providerSource, /id="activePrimaryModel"/);
+  assert.match(providerSource, /id="activeThinkingModel"/);
+  assert.match(sidebarSource, /activePrimaryModel\.textContent = primaryModel \|\| "未配置"/);
+  assert.match(sidebarSource, /activeThinkingModel\.textContent = thinkingModel \|\| "未配置"/);
+});
+
+test("sidebar uses one compact workbench instead of tabbed pages", () => {
+  const providerSource = fs.readFileSync(path.join(extensionRoot, "sidebarProvider.js"), "utf8");
+  const sidebarSource = fs.readFileSync(path.join(extensionRoot, "media", "sidebar.js"), "utf8");
+
+  assert.match(providerSource, /API Key 绑定的分组/);
+  assert.match(providerSource, /class="status-panel"/);
+  assert.match(providerSource, /class="section-panel"/);
+  assert.match(providerSource, /id="advancedBody" class="advanced-body hidden"/);
+  assert.match(providerSource, /id="customThinkingSettings" class="setting-group hidden"/);
+  assert.match(providerSource, /id="cfgCustomThinkingEnabled"/);
+  assert.match(providerSource, /仅在当前中转支持对应参数时生效/);
+  assert.match(providerSource, /data-ws-action="saveMultiGatewayConfig">保存并应用/);
+  assert.doesNotMatch(providerSource, /class="tabs"|data-tab=|data-ws-action="newWindow"|data-ws-action="refreshPatchStatus"/);
+  assert.match(sidebarSource, /class="gateway-row"/);
+  assert.match(sidebarSource, /updateMultiThinkingOptions\("primary"/);
+  assert.match(sidebarSource, /updateMultiThinkingOptions\("thinking"/);
+  assert.match(sidebarSource, /const actionState = \["busy", "success", "error"\]/);
+});
+
+test("thinking controls use user-facing labels without provider API jargon", () => {
+  assert.equal(getThinkingIntensityHint("claude"), "思考强度");
+  assert.equal(getThinkingIntensityHint("gpt"), "思考强度");
+  assert.equal(getThinkingIntensityHint("gemini"), "思考强度");
+  const labels = [
+    ...getThinkingEffortOptions("claude", "claude-opus-4-8"),
+    ...getThinkingEffortOptions("gpt", "gpt-5.6-test"),
+    ...getThinkingEffortOptions("gemini", "gemini-3.5-flash")
+  ].map(([, label]) => label).join(" ");
+  assert.doesNotMatch(labels, /adaptive|budget_tokens|reasoning\.effort|thinking_level/i);
 });
 
 test("hybrid-server POST /api/config hot reload responds without timeout", {

@@ -129,6 +129,7 @@ class SidebarProvider {
     this.context = tmp02;
     this.logLines = [];
     this.lastStatusPostMs = 0;
+    this.messageQueue = Promise.resolve();
     this.proxyManager = tmp1;
     this.proxyManager.onLog(arg0 => {
       this.logLines.push(arg0);
@@ -174,7 +175,15 @@ class SidebarProvider {
       tmp02.webview.html = this.renderFallbackHtml(tmp03);
       vscode.window.showErrorMessage("Devin BYOK Bridge 控制面板加载失败：" + (tmp03 instanceof Error ? tmp03.message : String(tmp03)));
     }
-    tmp02.webview.onDidReceiveMessage(arg0 => this.handleMessage(arg0));
+    tmp02.webview.onDidReceiveMessage(arg0 => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleMessage(arg0))
+        .catch(arg1 => {
+          const tmp03 = arg1 instanceof Error ? arg1.message : String(arg1);
+          this.logLines.push("处理侧栏消息失败: " + tmp03);
+          this.postActionState("config", "error", "操作失败：" + tmp03);
+        });
+    });
     if (this.proxyManager.getStatus().running) {
       this.refresh();
     }
@@ -334,38 +343,51 @@ class SidebarProvider {
   getGatewayConfig() {
     const tmp0 = this.context.globalState.get("MULTI_GATEWAY_CONFIG");
     if (tmp0 && typeof tmp0 === "object" && Array.isArray(tmp0.gateways)) {
-      return tmp0;
+      return {
+        ...tmp0,
+        activeSlots: {
+          byok1: tmp0.activeSlots?.byok1 || null,
+          byok2: tmp0.activeSlots?.byok2 || null
+        },
+        customThinkingEnabled: tmp0.customThinkingEnabled === true
+      };
     }
-    return { gateways: [], activeSlots: { byok1: null, byok2: null } };
+    return { gateways: [], activeSlots: { byok1: null, byok2: null }, customThinkingEnabled: false };
   }
-  saveGatewayConfig(tmp0) {
-    this.context.globalState.update("MULTI_GATEWAY_CONFIG", tmp0);
+  async saveGatewayConfig(tmp0) {
+    await this.context.globalState.update("MULTI_GATEWAY_CONFIG", tmp0);
   }
-  addGateway(tmp0, tmp1, tmp2) {
+  async addGateway(tmp0, tmp1, tmp2) {
     const tmp3 = this.getGatewayConfig();
     const tmp4 = { id: "gw-" + Date.now(), name: tmp0, baseUrl: tmp1, apiKey: tmp2, models: [], fetchedAt: 0 };
     tmp3.gateways.push(tmp4);
-    this.saveGatewayConfig(tmp3);
+    await this.saveGatewayConfig(tmp3);
     return tmp4.id;
   }
-  updateGateway(tmp0, tmp1) {
+  async updateGateway(tmp0, tmp1) {
     const tmp2 = this.getGatewayConfig();
     const tmp3 = tmp2.gateways.findIndex(g => g.id === tmp0);
     if (tmp3 >= 0) {
-      tmp2.gateways[tmp3] = { ...tmp2.gateways[tmp3], ...tmp1 };
-      this.saveGatewayConfig(tmp2);
+      const tmp4 = tmp2.gateways[tmp3];
+      const tmp5 = Object.prototype.hasOwnProperty.call(tmp1, "baseUrl") && String(tmp1.baseUrl || "").trim() !== String(tmp4.baseUrl || "").trim() || Object.prototype.hasOwnProperty.call(tmp1, "apiKey") && String(tmp1.apiKey || "").trim() !== String(tmp4.apiKey || "").trim();
+      tmp2.gateways[tmp3] = {
+        ...tmp4,
+        ...tmp1,
+        ...(tmp5 ? { models: [], fetchedAt: 0, capability: null } : {})
+      };
+      await this.saveGatewayConfig(tmp2);
       return true;
     }
     return false;
   }
-  deleteGateway(tmp0) {
+  async deleteGateway(tmp0) {
     const tmp1 = this.getGatewayConfig();
     const tmp2 = tmp1.gateways.filter(g => g.id !== tmp0);
     if (tmp2.length < tmp1.gateways.length) {
       tmp1.gateways = tmp2;
       if (tmp1.activeSlots.byok1?.gatewayId === tmp0) tmp1.activeSlots.byok1 = null;
       if (tmp1.activeSlots.byok2?.gatewayId === tmp0) tmp1.activeSlots.byok2 = null;
-      this.saveGatewayConfig(tmp1);
+      await this.saveGatewayConfig(tmp1);
       return true;
     }
     return false;
@@ -376,53 +398,84 @@ class SidebarProvider {
     if (!tmp2) throw new Error("网关不存在");
     const tmp3 = await this.fetchModelsFromGateway(tmp2.apiKey, tmp2.baseUrl);
     const tmp4 = [...(tmp3?.providers?.anthropic?.models || []), ...(tmp3?.providers?.openai?.models || [])];
-    this.updateGateway(tmp0, { models: tmp4, fetchedAt: Date.now() });
+    await this.updateGateway(tmp0, {
+      models: tmp4,
+      fetchedAt: Date.now(),
+      capability: tmp3.gatewayDetection || tmp2.capability || null
+    });
     return tmp4;
   }
-  setActiveSlot(tmp0, tmp1, tmp2, tmp3) {
-    const tmp4 = this.getGatewayConfig();
-    tmp4.activeSlots[tmp0] = { gatewayId: tmp1, model: tmp2, thinkingEffort: tmp3 || "" };
-    this.saveGatewayConfig(tmp4);
+  async setActiveSlots(tmp0, tmp1, customThinkingEnabled = false) {
+    const tmp2 = this.getGatewayConfig();
+    tmp2.activeSlots = {
+      byok1: tmp0,
+      byok2: tmp1
+    };
+    tmp2.customThinkingEnabled = customThinkingEnabled === true;
+    await this.saveGatewayConfig(tmp2);
+    return tmp2;
   }
-  applyGatewayConfigToEnv() {
-    const tmp0 = this.getGatewayConfig();
+  applyGatewayConfigToEnv(tmp0 = this.getGatewayConfig()) {
     const tmp1 = {};
+    const customThinkingEnabled = tmp0.customThinkingEnabled === true;
+    tmp1.CUSTOM_THINKING_ENABLED = customThinkingEnabled ? "true" : "false";
+    tmp1.OPENAI_THINKING_ENABLED = customThinkingEnabled ? "true" : "false";
     if (tmp0.activeSlots.byok1) {
       const tmp2 = tmp0.gateways.find(g => g.id === tmp0.activeSlots.byok1.gatewayId);
       if (tmp2) {
+        const tmp3 = tmp2.capability || gatewayUrl_1.deriveGatewayApiPaths(tmp2.baseUrl);
         tmp1.BYOK1_ANTHROPIC_API_HOST = tmp2.baseUrl;
         tmp1.BYOK1_ANTHROPIC_API_KEY = tmp2.apiKey;
+        tmp1.BYOK1_ANTHROPIC_API_PATH = tmp3.anthropicPath;
+        tmp1.BYOK1_GATEWAY_AUTH_MODE = tmp3.authMode || "both";
         tmp1.BYOK1_OPENAI_API_HOST = tmp2.baseUrl;
         tmp1.BYOK1_OPENAI_API_KEY = tmp2.apiKey;
+        tmp1.BYOK1_OPENAI_API_PATH = tmp3.openaiResponsesPath;
         tmp1.BYOK1_MODEL = tmp0.activeSlots.byok1.model;
-        tmp1.BYOK1_THINKING_EFFORT = tmp0.activeSlots.byok1.thinkingEffort;
+        tmp1.BYOK1_THINKING_EFFORT = customThinkingEnabled ? tmp0.activeSlots.byok1.thinkingEffort || "" : "";
       }
     }
     if (tmp0.activeSlots.byok2) {
       const tmp2 = tmp0.gateways.find(g => g.id === tmp0.activeSlots.byok2.gatewayId);
       if (tmp2) {
+        const tmp3 = tmp2.capability || gatewayUrl_1.deriveGatewayApiPaths(tmp2.baseUrl);
         tmp1.BYOK2_ANTHROPIC_API_HOST = tmp2.baseUrl;
         tmp1.BYOK2_ANTHROPIC_API_KEY = tmp2.apiKey;
+        tmp1.BYOK2_ANTHROPIC_API_PATH = tmp3.anthropicPath;
+        tmp1.BYOK2_GATEWAY_AUTH_MODE = tmp3.authMode || "both";
         tmp1.BYOK2_OPENAI_API_HOST = tmp2.baseUrl;
         tmp1.BYOK2_OPENAI_API_KEY = tmp2.apiKey;
+        tmp1.BYOK2_OPENAI_API_PATH = tmp3.openaiResponsesPath;
         tmp1.BYOK2_MODEL = tmp0.activeSlots.byok2.model;
-        tmp1.BYOK2_THINKING_EFFORT = tmp0.activeSlots.byok2.thinkingEffort;
+        tmp1.BYOK2_THINKING_EFFORT = customThinkingEnabled ? tmp0.activeSlots.byok2.thinkingEffort || "" : "";
       }
     }
     if (tmp1.BYOK1_ANTHROPIC_API_HOST) {
       tmp1.ANTHROPIC_API_HOST = tmp1.BYOK1_ANTHROPIC_API_HOST;
       tmp1.ANTHROPIC_API_KEY = tmp1.BYOK1_ANTHROPIC_API_KEY;
+      tmp1.ANTHROPIC_API_PATH = tmp1.BYOK1_ANTHROPIC_API_PATH;
+      tmp1.GATEWAY_AUTH_MODE = tmp1.BYOK1_GATEWAY_AUTH_MODE;
       tmp1.OPENAI_API_HOST = tmp1.BYOK1_OPENAI_API_HOST;
       tmp1.OPENAI_API_KEY = tmp1.BYOK1_OPENAI_API_KEY;
+      tmp1.OPENAI_API_PATH = tmp1.BYOK1_OPENAI_API_PATH;
       tmp1.DEFAULT_MODEL = tmp1.BYOK1_MODEL;
       tmp1.OPENAI_REASONING_EFFORT = tmp1.BYOK1_THINKING_EFFORT;
     }
     return tmp1;
   }
+  resolveEffectiveConfig(tmp02 = {}) {
+    const tmp1 = tmp02 && typeof tmp02 === "object" ? tmp02 : {};
+    return this.getModeScopedConfig({
+      ...this.proxyManager.readEnvConfig(),
+      ...tmp1,
+      ...this.applyGatewayConfigToEnv()
+    });
+  }
   getModeScopedConfig(tmp02 = this.proxyManager.readEnvConfig()) {
     const tmp1 = this.normalizeProviderBaseUrl({
       ...tmp02
     });
+    const customThinkingEnabled = tmp1.CUSTOM_THINKING_ENABLED === true || String(tmp1.CUSTOM_THINKING_ENABLED || "").trim().toLowerCase() === "true";
     if (!String(tmp1.BYOK1_MODEL || "").trim()) {
       tmp1.BYOK1_ANTHROPIC_API_HOST = tmp1.BYOK1_ANTHROPIC_API_HOST || tmp1.ANTHROPIC_API_HOST || "";
       tmp1.BYOK1_ANTHROPIC_API_KEY = tmp1.BYOK1_ANTHROPIC_API_KEY || tmp1.ANTHROPIC_API_KEY || "";
@@ -430,8 +483,14 @@ class SidebarProvider {
       tmp1.BYOK1_OPENAI_API_KEY = tmp1.BYOK1_OPENAI_API_KEY || tmp1.OPENAI_API_KEY || tmp1.BYOK1_ANTHROPIC_API_KEY || "";
       tmp1.BYOK1_MODEL = tmp1.DEFAULT_MODEL || "";
     }
-    if (!String(tmp1.BYOK1_THINKING_EFFORT || "").trim()) {
+    if (customThinkingEnabled && !String(tmp1.BYOK1_THINKING_EFFORT || "").trim()) {
       tmp1.BYOK1_THINKING_EFFORT = tmp1.OPENAI_REASONING_EFFORT || "";
+    }
+    if (!customThinkingEnabled) {
+      tmp1.BYOK1_THINKING_EFFORT = "";
+      tmp1.BYOK2_THINKING_EFFORT = "";
+      tmp1.OPENAI_REASONING_EFFORT = "";
+      tmp1.OPENAI_THINKING_ENABLED = "false";
     }
     if (!String(tmp1.BYOK1_OPENAI_SERVICE_TIER || "").trim()) {
       tmp1.BYOK1_OPENAI_SERVICE_TIER = tmp1.OPENAI_SERVICE_TIER || "";
@@ -471,8 +530,9 @@ class SidebarProvider {
   async applySavedConfig(tmp02, {
     silent = false
   } = {}) {
+    const effectiveConfig = this.resolveEffectiveConfig(tmp02);
     if (!silent) {
-      const tmp1 = this.validateByokSlots(tmp02).join("；");
+      const tmp1 = this.validateByokSlots(effectiveConfig).join("；");
       if (tmp1) {
         this.postActionState("config", "error", tmp1);
         await vscode.window.showErrorMessage(tmp1);
@@ -482,13 +542,13 @@ class SidebarProvider {
         };
       }
     }
-    const tmp2 = this.writeModeScopedConfig(tmp02);
+    const tmp2 = this.writeModeScopedConfig(effectiveConfig);
     const tmp3 = this.getRuntimeConfigForCurrentMode(tmp2);
     const tmp4 = this.proxyManager.getStatus();
     let tmp5 = "配置已保存；代理未运行，下次启动生效";
     let tmp6 = false;
     let tmp7 = false;
-    if (tmp4.running && this.validateByokSlots(tmp02).length === 0) {
+    if (tmp4.running && this.validateByokSlots(effectiveConfig).length === 0) {
       const {
         hybridPort: tmp04,
         inferencePort: tmp12
@@ -549,11 +609,16 @@ class SidebarProvider {
     };
   }
   normalizeModelsResponse(tmp02) {
-    if (tmp02?.data && Array.isArray(tmp02.data)) {
-      const tmp03 = tmp02.data.map(arg0 => ({
-        id: arg0.id,
-        provider: /claude|anthropic/i.test(arg0.id) ? "anthropic" : "openai"
-      }));
+    const tmp0 = Array.isArray(tmp02) ? tmp02 : Array.isArray(tmp02?.data) ? tmp02.data : Array.isArray(tmp02?.models) ? tmp02.models : null;
+    if (tmp0) {
+      const tmp03 = tmp0.map(arg0 => {
+        const tmp01 = String(arg0?.id || arg0?.name || arg0 || "").trim();
+        return {
+          ...(arg0 && typeof arg0 === "object" ? arg0 : {}),
+          id: tmp01,
+          provider: /claude|anthropic/i.test(tmp01) ? "anthropic" : "openai"
+        };
+      }).filter(arg0 => arg0.id);
       const tmp1 = tmp03.filter(arg0 => arg0.provider === "anthropic");
       const tmp2 = tmp03.filter(arg0 => arg0.provider === "openai");
       const tmp3 = {
@@ -576,14 +641,21 @@ class SidebarProvider {
     }
     throw new Error("未知的模型列表格式");
   }
-  httpGetModels(tmp02, tmp1, tmp2 = 5000) {
+  httpGetModels(tmp02, tmp1, tmp2 = 5000, tmp6 = "both") {
     return new Promise((fn, fn2) => {
       const tmp22 = new URL(tmp02);
       const tmp3 = tmp22.protocol === "http:" ? http : https;
-      const tmp4 = {};
+      const tmp4 = {
+        accept: "application/json",
+        "user-agent": "API2Devin/2.6.3"
+      };
       if (tmp1) {
-        tmp4["x-api-key"] = tmp1;
-        tmp4.authorization = "Bearer " + tmp1;
+        if (tmp6 === "both" || tmp6 === "x-api-key") {
+          tmp4["x-api-key"] = tmp1;
+        }
+        if (tmp6 === "both" || tmp6 === "bearer") {
+          tmp4.authorization = "Bearer " + tmp1;
+        }
       }
       const tmp5 = tmp3.request({
         hostname: tmp22.hostname,
@@ -599,13 +671,23 @@ class SidebarProvider {
         arg0.on("data", arg02 => tmp12 += arg02);
         arg0.on("end", () => {
           if (arg0.statusCode !== 200) {
-            fn2(new Error("HTTP " + arg0.statusCode + ": " + tmp12.slice(0, 200)));
+            const tmp03 = new Error("HTTP " + arg0.statusCode + ": " + tmp12.slice(0, 500));
+            tmp03.statusCode = arg0.statusCode;
+            tmp03.responseBody = tmp12.slice(0, 2000);
+            tmp03.requestUrl = tmp02;
+            tmp03.authMode = tmp6;
+            fn2(tmp03);
             return;
           }
           try {
             fn(this.normalizeModelsResponse(JSON.parse(tmp12)));
           } catch (tmp03) {
-            fn2(new Error("JSON 解析失败: " + tmp03.message));
+            const tmp04 = new Error("模型列表响应无法识别: " + tmp03.message);
+            tmp04.statusCode = arg0.statusCode;
+            tmp04.responseBody = tmp12.slice(0, 2000);
+            tmp04.requestUrl = tmp02;
+            tmp04.authMode = tmp6;
+            fn2(tmp04);
           }
         });
       });
@@ -618,21 +700,29 @@ class SidebarProvider {
     });
   }
   getModelListUrl(tmp02) {
-    const tmp1 = String(tmp02 || "").trim();
-    if (!tmp1) {
-      throw new Error("请先填写 Base URL");
+    return gatewayUrl_1.buildGatewayModelUrls(tmp02)[0];
+  }
+  isTerminalGatewayAccessError(tmp02) {
+    const tmp1 = tmp02 instanceof Error ? tmp02.message : String(tmp02 || "");
+    return /分组\s*[^\s)]+\s*(?:已被弃用|弃用)|group\s+[^\s)]+\s+(?:has been )?deprecated|deprecated\s+group|insufficient[_\s-]*(?:quota|balance)|余额不足|账号已停用|account.*disabled/i.test(tmp1);
+  }
+  shouldTryNextModelEndpoint(tmp02) {
+    const tmp1 = Number(tmp02?.statusCode || 0);
+    const tmp2 = tmp02 instanceof Error ? tmp02.message : String(tmp02 || "");
+    return [404, 405, 501].includes(tmp1) || /模型列表响应无法识别|cannot\s+(?:get|post)|route.*not found|endpoint.*not found|unknown.*endpoint|not implemented/i.test(tmp2);
+  }
+  async requestModelCandidate(tmp02, tmp1, tmp2, tmp3) {
+    try {
+      return await this.httpGetModels(tmp02, tmp1, tmp2, tmp3);
+    } catch (tmp4) {
+      if (this.isSslProtocolMismatch(tmp4)) {
+        const tmp5 = this.toggleGatewayProtocol(tmp02);
+        if (tmp5 !== tmp02) {
+          return await this.httpGetModels(tmp5, tmp1, tmp2, tmp3);
+        }
+      }
+      throw tmp4;
     }
-    const tmp2 = ensureGatewayUrl(tmp1);
-    const tmp3 = new URL(tmp2);
-    const tmp4 = tmp3.pathname.replace(/\/+$/, "");
-    if (/\/models$/i.test(tmp4)) {
-      tmp3.pathname = tmp4;
-    } else {
-      const tmp03 = tmp4.replace(/\/(messages|responses)$/i, "") || "/v1";
-      tmp3.pathname = tmp03 + "/models";
-    }
-    tmp3.search = "";
-    return tmp3.toString();
   }
   normalizeProviderBaseUrl(tmp02) {
     const tmp1 = {
@@ -679,18 +769,48 @@ class SidebarProvider {
   async fetchModelsFromGateway(tmp02, tmp1) {
     const tmp2 = String(tmp1 || "").trim();
     if (tmp2) {
-      const tmp3 = this.getModelListUrl(tmp2);
-      try {
-        return await this.httpGetModels(tmp3, tmp02, 8000);
-      } catch (tmp4) {
-        if (this.isSslProtocolMismatch(tmp4)) {
-          const tmp5 = this.toggleGatewayProtocol(tmp3);
-          if (tmp5 !== tmp3) {
-            return await this.httpGetModels(tmp5, tmp02, 8000);
+      const tmp3 = gatewayUrl_1.buildGatewayModelUrls(tmp2);
+      const tmp4 = ["both", "bearer", "x-api-key"];
+      let tmp5 = null;
+      for (const tmp6 of tmp3) {
+        let tmp7 = null;
+        for (const tmp8 of tmp4) {
+          try {
+            const tmp9 = await this.requestModelCandidate(tmp6, tmp02, 8000, tmp8);
+            const tmp10 = gatewayUrl_1.deriveGatewayApiPaths(tmp2, tmp6);
+            Object.defineProperty(tmp9, "gatewayDetection", {
+              value: {
+                modelListUrl: tmp6,
+                authMode: tmp8,
+                ...tmp10,
+                detectedAt: Date.now()
+              },
+              enumerable: false
+            });
+            return tmp9;
+          } catch (tmp9) {
+            tmp5 = tmp9;
+            tmp7 = tmp9;
+            if (this.isTerminalGatewayAccessError(tmp9)) {
+              throw tmp9;
+            }
+            if (tmp9?.statusCode === 401 || tmp9?.statusCode === 403) {
+              continue;
+            }
+            break;
           }
         }
-        throw tmp4;
+        if (tmp7 && this.shouldTryNextModelEndpoint(tmp7)) {
+          continue;
+        }
+        if (tmp7 && (tmp7.statusCode === 401 || tmp7.statusCode === 403)) {
+          continue;
+        }
+        if (tmp7) {
+          throw tmp7;
+        }
       }
+      throw tmp5 || new Error("未找到可用的模型列表接口");
     }
     const tmp3 = this.proxyManager.getStatus();
     if (tmp3.running) {
@@ -705,7 +825,12 @@ class SidebarProvider {
     if (/EPROTO|WRONG_VERSION_NUMBER|SSL routines/i.test(tmp1)) {
       return "加载模型失败：Base URL 的 HTTP/HTTPS 协议不匹配。本地或非 443 端口网关请使用 http://，公网 API 请使用 https://。";
     }
-    if (/convert_request_failed|not implemented|new_api_error|responses api/i.test(tmp1)) {
+    if (/分组\s*[^\s)]+\s*(?:已被弃用|弃用)|group\s+[^\s)]+\s+(?:has been )?deprecated|deprecated\s+group/i.test(tmp1)) {
+      const tmp2 = tmp1.match(/分组\s*([^\s)]+)\s*(?:已被弃用|弃用)/i);
+      const tmp3 = tmp2 ? "“" + tmp2[1] + "”" : "当前";
+      return "加载模型失败：API Key 绑定的分组" + tmp3 + "已被网关停用。域名和网络正常，请在 Routify 控制台为该 Key 绑定有效分组或重新生成 Key 后重试。";
+    }
+    if (/convert_request_failed|not implemented|responses api|invalid.*responses/i.test(tmp1)) {
       return "加载模型失败：当前网关可能不支持 OpenAI Responses API。";
     }
     if (/signature.*field required|field required.*signature|ValidationException/i.test(tmp1)) {
@@ -1677,19 +1802,14 @@ class SidebarProvider {
     switch (tmp02.command) {
       case "startProxy":
         {
-          const tmp03 = tmp02.config;
-          if (tmp03) {
-            const tmp04 = this.validateByokSlots(tmp03).join("；");
-            if (tmp04) {
-              this.postActionState("proxy", "error", tmp04);
-              await vscode.window.showErrorMessage(tmp04);
-              break;
-            }
+          const tmp03 = this.resolveEffectiveConfig(tmp02.config);
+          const tmp04 = this.validateByokSlots(tmp03).join("；");
+          if (tmp04) {
+            this.postActionState("proxy", "error", tmp04);
+            await vscode.window.showErrorMessage(tmp04);
+            break;
           }
-          let tmp1;
-          if (tmp03) {
-            tmp1 = this.writeModeScopedConfig(tmp03);
-          }
+          const tmp1 = this.writeModeScopedConfig(tmp03);
           const tmp2 = this.getRuntimeConfigForCurrentMode(tmp1);
           const tmp3 = await this.proxyManager.start(tmp02.mode || "both", tmp2);
           if (!tmp3) {
@@ -1999,7 +2119,7 @@ class SidebarProvider {
             this.postActionState("config", "error", "请填写网关名称、Base URL 和 API Key");
             break;
           }
-          const gatewayId = this.addGateway(name, baseUrl, apiKey);
+          const gatewayId = await this.addGateway(name, baseUrl, apiKey);
           this.view?.webview.postMessage({ type: "gatewayAdded", gatewayId: gatewayId });
           this.postActionState("config", "success", "网关已添加");
           this.refresh();
@@ -2015,7 +2135,7 @@ class SidebarProvider {
             this.postActionState("config", "error", "请填写完整的网关信息");
             break;
           }
-          if (this.updateGateway(gatewayId, { name: name, baseUrl: baseUrl, apiKey: apiKey })) {
+          if (await this.updateGateway(gatewayId, { name: name, baseUrl: baseUrl, apiKey: apiKey })) {
             this.view?.webview.postMessage({ type: "gatewayUpdated", gatewayId: gatewayId });
             this.postActionState("config", "success", "网关已更新");
             this.refresh();
@@ -2027,7 +2147,7 @@ class SidebarProvider {
       case "deleteGateway":
         {
           const gatewayId = String(tmp02.gatewayId || "").trim();
-          if (this.deleteGateway(gatewayId)) {
+          if (await this.deleteGateway(gatewayId)) {
             this.view?.webview.postMessage({ type: "gatewayDeleted", gatewayId: gatewayId });
             this.postActionState("config", "success", "网关已删除");
             this.refresh();
@@ -2039,11 +2159,11 @@ class SidebarProvider {
       case "fetchGatewayModels":
         {
           const gatewayId = String(tmp02.gatewayId || "").trim();
-          this.postActionState("config", "busy", "正在获取模型列表...");
+          this.postActionState("config", "busy", "正在自动识别网关并获取模型...");
           try {
             const models = await this.fetchGatewayModels(gatewayId);
             this.view?.webview.postMessage({ type: "gatewayModelsLoaded", gatewayId: gatewayId, models: models });
-            this.postActionState("config", "success", "已获取 " + models.length + " 个模型");
+            this.postActionState("config", "success", "网关识别完成，已获取 " + models.length + " 个模型");
             this.refresh();
           } catch (err) {
             const errorMsg = this.formatModelFetchError(err);
@@ -2059,13 +2179,28 @@ class SidebarProvider {
           const byok2GatewayId = String(tmp02.byok2GatewayId || "").trim();
           const byok2Model = String(tmp02.byok2Model || "").trim();
           const byok2ThinkingEffort = String(tmp02.byok2ThinkingEffort || "").trim();
+          const customThinkingEnabled = tmp02.customThinkingEnabled === true;
           if (!byok1GatewayId || !byok1Model || !byok2GatewayId || !byok2Model) {
             this.postActionState("config", "error", "请为主模型和思考模型选择网关和模型");
             break;
           }
-          this.setActiveSlot("byok1", byok1GatewayId, byok1Model, byok1ThinkingEffort);
-          this.setActiveSlot("byok2", byok2GatewayId, byok2Model, byok2ThinkingEffort);
-          const envConfig = this.applyGatewayConfigToEnv();
+          const gatewayConfig = this.getGatewayConfig();
+          const byok1Gateway = gatewayConfig.gateways.find(gateway => gateway.id === byok1GatewayId);
+          const byok2Gateway = gatewayConfig.gateways.find(gateway => gateway.id === byok2GatewayId);
+          if (!byok1Gateway || !byok2Gateway) {
+            this.postActionState("config", "error", "所选网关已不存在，请重新选择");
+            break;
+          }
+          if (!String(byok1Gateway.apiKey || "").trim() || !String(byok2Gateway.apiKey || "").trim()) {
+            this.postActionState("config", "error", "所选网关缺少 API Key，请先编辑网关");
+            break;
+          }
+          const savedGatewayConfig = await this.setActiveSlots(
+            { gatewayId: byok1GatewayId, model: byok1Model, thinkingEffort: byok1ThinkingEffort },
+            { gatewayId: byok2GatewayId, model: byok2Model, thinkingEffort: byok2ThinkingEffort },
+            customThinkingEnabled
+          );
+          const envConfig = this.applyGatewayConfigToEnv(savedGatewayConfig);
           await this.applySavedConfig(envConfig, { silent: false });
           break;
         }
@@ -2197,31 +2332,13 @@ class SidebarProvider {
     const tmp22 = "var(--vscode-foreground,#d4d4d8)";
     const tmp23 = "var(--vscode-input-foreground,var(--vscode-foreground,#e4e4e7))";
     const tmp24 = "'Cascadia Code','Fira Code',monospace";
-    const tmp25 = esc(tmp2.BYOK1_ANTHROPIC_API_HOST || tmp2.ANTHROPIC_API_HOST || "");
-    const tmp26 = esc(tmp2.BYOK1_ANTHROPIC_API_KEY || tmp2.ANTHROPIC_API_KEY || "");
-    const tmp27 = esc(tmp2.BYOK1_MODEL || tmp2.DEFAULT_MODEL || "");
-    const tmp28 = esc(tmp2.BYOK2_ANTHROPIC_API_HOST || "");
-    const tmp29 = esc(tmp2.BYOK2_ANTHROPIC_API_KEY || "");
-    const tmp30 = esc(tmp2.BYOK2_MODEL || "");
-    const tmp31 = esc(tmp2.BYOK1_THINKING_EFFORT || tmp2.OPENAI_REASONING_EFFORT || "");
-    const tmp32 = esc(tmp2.BYOK2_THINKING_EFFORT || "");
-    const tmp33 = Object.prototype.hasOwnProperty.call(tmp2, "OPENAI_REASONING_EFFORT") ? tmp2.OPENAI_REASONING_EFFORT : "";
-    const tmp40 = tmp2.BYOK1_OPENAI_SERVICE_TIER || tmp2.OPENAI_SERVICE_TIER || "";
-    const tmp41 = tmp2.BYOK2_OPENAI_SERVICE_TIER || "";
-    const tmp44 = tmp2.BYOK1_OPENAI_REASONING_MODE || tmp2.OPENAI_REASONING_MODE || "";
-    const tmp45 = tmp2.BYOK2_OPENAI_REASONING_MODE || "";
-    
-    const simpleBaseUrl = esc(tmp2.BYOK1_ANTHROPIC_API_HOST || tmp2.ANTHROPIC_API_HOST || "");
-    const simpleApiKey = esc(tmp2.BYOK1_ANTHROPIC_API_KEY || tmp2.ANTHROPIC_API_KEY || "");
     const simplePrimaryModel = esc(tmp2.BYOK1_MODEL || tmp2.DEFAULT_MODEL || "");
     const simpleThinkingModel = esc(tmp2.BYOK2_MODEL || tmp2.BYOK1_MODEL || tmp2.DEFAULT_MODEL || "");
-    const simplePrimaryThinkingEffort = esc(tmp2.BYOK1_THINKING_EFFORT || tmp2.OPENAI_REASONING_EFFORT || "");
-    const simpleThinkingEffort = esc(tmp2.BYOK2_THINKING_EFFORT || "");
     
     const tmp42 = this.getInstalledVersion();
-    const tmp43 = this.getGitRemoteUrl();
-    const tmp34 = tmp7 === tmp1.patches.length ? "badge-ok" : "badge-warn";
-    const tmp35 = tmp7 === tmp1.patches.length ? "已就绪" : "需安装";
+    const patchReady = tmp1.patches.length > 0 && tmp7 === tmp1.patches.length;
+    const tmp34 = patchReady ? "badge-ok" : "badge-warn";
+    const tmp35 = patchReady ? "已就绪" : "需安装";
     const tmp37 = tmp2.SYSTEM_PROMPT_OVERRIDE === "true" ? "true" : "false";
     const tmp38 = this.getSystemPromptTargetPath(tmp2);
     const tmp39 = tmp37 === "true";
@@ -2629,44 +2746,216 @@ input:focus, select:focus {
   100% { transform: translateX(320%) }
 }
 
-/* ── Tabs ── */
-.tabs {
-  display: flex;
-  background: ${tmp20};
+/* ── Single-page workbench ── */
+.status-panel, .section-panel {
+  background: ${tmp19};
   border: 1px solid ${tmp21};
   border-radius: 8px;
-  padding: 3px;
-  margin-bottom: 12px;
-  gap: 4px;
+  margin-bottom: 10px;
 }
-.tab-btn {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: ${tmp16};
-  padding: 6px 4px;
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  text-align: center;
+.status-panel {
+  padding: 10px;
 }
-.tab-btn:hover {
+.status-head, .section-head, .setting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.status-brand {
+  min-width: 0;
+}
+.status-title {
   color: ${tmp23};
-  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  font-weight: 800;
 }
-.tab-btn.active {
-  background: ${tmp19};
+.status-badges {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.status-head #proxyControlButtons {
+  flex: none;
+}
+.status-head #proxyControlButtons .btn {
+  min-width: 74px;
+}
+.active-models {
+  display: grid;
+  gap: 4px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid ${tmp21};
+}
+.active-model-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.active-model-row span:first-child {
+  color: ${tmp16};
+  font-size: 9px;
+}
+.active-model-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: ${tmp15};
+  font-family: ${tmp24};
+  font-size: 10px;
+  text-align: right;
+}
+.runtime-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+  color: ${tmp16};
+  font-size: 9px;
+}
+.runtime-stats b {
+  color: ${tmp22};
+  font-family: ${tmp24};
+  font-weight: 700;
+}
+.section-panel {
+  padding: 10px;
+}
+.section-head {
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+.section-title {
+  color: ${tmp23};
+  font-size: 12px;
+  font-weight: 800;
+}
+.section-subtitle {
+  margin-top: 2px;
+  color: ${tmp16};
+  font-size: 9px;
+}
+.gateway-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gateway-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 7px;
+  background: ${tmp20};
   border: 1px solid ${tmp21};
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
 }
-.tab-content {
-  display: none;
+.gateway-main {
+  min-width: 0;
+  flex: 1;
 }
-.tab-content.active {
-  display: block;
+.gateway-name {
+  overflow: hidden;
+  color: ${tmp23};
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gateway-meta {
+  overflow: hidden;
+  margin-top: 2px;
+  color: ${tmp16};
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gateway-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.icon-btn {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: ${tmp16};
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 20px;
+}
+.icon-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+}
+.model-panel {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid ${tmp21};
+}
+.model-selects {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  gap: 6px;
+}
+.compatibility-note {
+  margin-top: 7px;
+  padding: 7px 8px;
+  border-left: 2px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.06);
+  color: ${tmp16};
+  font-size: 9px;
+  line-height: 1.45;
+}
+.model-row .fg {
+  min-width: 0;
+}
+.primary-action {
+  width: 100%;
+  margin-top: 2px;
+}
+.advanced-panel .section-head {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.advanced-body {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid ${tmp21};
+}
+.setting-group + .setting-group {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid ${tmp21};
+}
+.setting-title {
+  color: ${tmp23};
+  font-size: 10px;
+  font-weight: 700;
+}
+.ports-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 7px;
+}
+.setting-head + .patch-path, .setting-head + .ports-row {
+  margin-top: 7px;
+}
+.footer-meta {
+  margin-top: 10px;
+  color: ${tmp17};
+  font-size: 8px;
+  text-align: center;
 }
 
 /* ── Misc ── */
@@ -3116,42 +3405,7 @@ input:focus, select:focus {
 </style>
 </head>
 <body>
-
-<div class="card">
-    <div class="card-head between">
-        <span class="toggle-section collapsed" data-ws-toggle="tutorialBody">使用教程</span>
-        <span class="badge badge-ok">内置</span>
-    </div>
-    <div id="tutorialBody" class="guide-body hidden">
-        <div class="guide-block">
-            <b>快速使用</b>
-            <ol>
-                <li>在「网关配置」中填写 Base URL 和 API Key，点击「连接并获取模型列表」。</li>
-                <li>在「模型选择」中选择主模型，可选择思考强度，点击「保存配置」。</li>
-                <li>切换到「控制」标签，点击「一键启动」。</li>
-                <li>补丁就绪后重载窗口；Devin 里使用 <code>Claude Opus 4 BYOK</code> 或 <code>Claude Opus 4 Thinking BYOK</code>。</li>
-            </ol>
-        </div>
-        <div class="guide-block">
-            <b>日常使用</b>
-            <ul>
-                <li>只换 API Key 或模型：修改后重新保存即可。</li>
-                <li>聊天没有走代理：重新安装补丁并重载窗口。</li>
-                <li>模型列表加载失败：检查 API Key、余额、网络和日志错误。</li>
-            </ul>
-        </div>
-        <div class="guide-note">配置会自动同步到两个 BYOK 槽位，可以在 Devin 中灵活使用不同的模型入口。</div>
-    </div>
-</div>
-
-<div class="tabs">
-    <button type="button" class="tab-btn active" data-tab="tab-config">配置连接</button>
-    <button type="button" class="tab-btn" data-tab="tab-control">控制状态</button>
-    <button type="button" class="tab-btn" data-tab="tab-system">系统补丁</button>
-</div>
-
-<div id="mainPanel" class="">
-    <!-- hidden config fields, always active in the background -->
+<div id="mainPanel">
     <input type="hidden" id="cfgApiMode" value="unified_custom">
     <input type="hidden" id="cfgAnthropicPath" value="${esc(tmp2.ANTHROPIC_API_PATH || "/v1/messages")}">
     <input type="hidden" id="cfgOpenaiPath" value="${esc(tmp2.OPENAI_API_PATH || "/v1/responses")}">
@@ -3161,6 +3415,37 @@ input:focus, select:focus {
     <input type="hidden" id="cfgSysPromptPath" value="${esc(tmp38)}">
     <input type="hidden" id="cfgDefaultModelCustom" value="">
     <div id="environmentCheckResult" class="env-check hidden"></div>
+
+    <section class="status-panel">
+        <div class="status-head">
+            <div class="status-brand">
+                <div class="status-title">API2Devin</div>
+                <div class="status-badges">
+                    <span id="proxyRunBadge" class="badge ${tmp02.running ? "badge-ok" : "badge-warn"}">${tmp02.running ? "运行中" : "已停止"}</span>
+                    <span id="patchBadge" class="badge ${tmp34}">补丁${tmp35}</span>
+                </div>
+            </div>
+            <div id="proxyControlButtons">
+                ${tmp02.running ? "<button type=\"button\" class=\"btn btn-d\" data-ws-action=\"stopProxy\">停止</button>" : "<button type=\"button\" class=\"btn btn-p\" data-ws-action=\"startProxy\" data-ws-mode=\"both\">启动代理</button>"}
+            </div>
+        </div>
+        <div class="active-models">
+            <div class="active-model-row">
+                <span>主模型</span>
+                <span id="activePrimaryModel" class="active-model-value" title="${simplePrimaryModel || "未配置"}">${simplePrimaryModel || "未配置"}</span>
+            </div>
+            <div class="active-model-row">
+                <span>思考模型</span>
+                <span id="activeThinkingModel" class="active-model-value" title="${simpleThinkingModel || "未配置"}">${simpleThinkingModel || "未配置"}</span>
+            </div>
+        </div>
+        <div class="runtime-stats">
+            <span>端口 <b id="statPort">${tmp02.hybridPort}</b></span>
+            <span>时长 <b id="statUptime">${tmp02.running ? formatUptime(tmp02.uptime) : "--"}</b></span>
+            <span>请求 <b id="statRequests">${tmp02.requestCount}</b></span>
+        </div>
+    </section>
+
     <div id="proxyActionState" class="action-state hidden">
         <div id="proxyActionText" class="action-text"></div>
         <div class="action-progress"><div class="action-progress-bar"></div></div>
@@ -3170,163 +3455,140 @@ input:focus, select:focus {
         <div class="action-progress"><div class="action-progress-bar"></div></div>
     </div>
 
-    <!-- TAB 1: Config -->
-    <div class="tab-content active" id="tab-config">
-        <div class="guide-block" style="margin-bottom:10px">
-            <div class="card-head between" style="margin-bottom:8px;padding:0">
-                <b>网关管理</b>
-                <button type="button" class="btn btn-s sm" data-ws-action="showAddGatewayForm">+ 添加</button>
+    <section class="section-panel">
+        <div class="section-head">
+            <div>
+                <div class="section-title">网关与模型</div>
+                <div class="section-subtitle">添加网关、加载模型并保存当前选择</div>
             </div>
-            <div id="addGatewayForm" class="hidden" style="border:1px solid ${tmp21};border-radius:4px;padding:8px;margin-bottom:8px;background:rgba(255,255,255,0.01)">
-                <div class="fg"><label>网关名称</label><input type="text" id="newGatewayName" placeholder="例如 OpenAI Official"></div>
-                <div class="fg"><label>Base URL</label><input type="text" id="newGatewayBaseUrl" placeholder="例如 api.openai.com"></div>
-                <div class="fg"><label>API Key</label><input type="password" id="newGatewayApiKey" placeholder="sk-..." autocomplete="off"></div>
+            <button type="button" class="btn btn-s sm" data-ws-action="showAddGatewayForm">+ 网关</button>
+        </div>
+        <div id="addGatewayForm" class="hidden" style="border:1px solid ${tmp21};border-radius:6px;padding:8px;margin-bottom:8px;background:${tmp20}">
+            <div class="fg"><label>网关名称</label><input type="text" id="newGatewayName" placeholder="例如 OpenAI Official"></div>
+            <div class="fg"><label>Base URL</label><input type="text" id="newGatewayBaseUrl" placeholder="例如 api.openai.com"></div>
+            <div class="fg"><label>API Key</label><input type="password" id="newGatewayApiKey" placeholder="sk-..." autocomplete="off"></div>
+            <div class="btns">
+                <button type="button" class="btn btn-p sm" data-ws-action="addGateway">保存网关</button>
+                <button type="button" class="btn btn-s sm" data-ws-action="cancelAddGateway">取消</button>
+            </div>
+        </div>
+        <div id="gatewayList" class="gateway-list"></div>
+
+        <div id="multiModelSelectionPanel" class="model-panel" style="display:none">
+            <div class="model-selects">
+                <div class="fg">
+                    <label>主模型 · BYOK1</label>
+                    <select id="cfgMultiPrimaryModel">
+                        <option value="" disabled selected>请先加载模型</option>
+                    </select>
+                </div>
+                <div class="fg">
+                    <label>思考模型 · BYOK2</label>
+                    <select id="cfgMultiThinkingModel">
+                        <option value="" disabled selected>请先加载模型</option>
+                    </select>
+                </div>
+            </div>
+            <button type="button" class="btn btn-p primary-action" data-ws-action="saveMultiGatewayConfig">保存并应用</button>
+        </div>
+    </section>
+
+    <section class="section-panel advanced-panel">
+        <div class="section-head">
+            <div>
+                <span class="section-title toggle-section collapsed" data-ws-toggle="advancedBody">高级设置</span>
+                <div class="section-subtitle">端口、提示词、补丁与日志</div>
+            </div>
+            <span class="badge badge-ok">v${esc(tmp42)}</span>
+        </div>
+        <div id="advancedBody" class="advanced-body hidden">
+            <div class="setting-group">
+                <div class="setting-head">
+                    <span class="setting-title">运行设置</span>
+                    <div class="row">
+                        <span style="font-size:9px;color:${tmp16}">自动启动</span>
+                        <label class="tog"><input type="checkbox" id="cfgAutoStartProxy" ${tmp5 ? "checked" : ""}><span></span></label>
+                    </div>
+                </div>
+                <div class="ports-row">
+                    <div class="fg" style="margin-bottom:0">
+                        <label>Hybrid 端口</label>
+                        <input type="number" id="cfgHybridPort" value="${esc(String(tmp02.hybridPort))}" placeholder="3006" min="1" max="65535">
+                    </div>
+                    <div class="fg" style="margin-bottom:0">
+                        <label>Inference 端口</label>
+                        <input type="number" id="cfgInferencePort" value="${esc(String(tmp02.inferencePort))}" placeholder="3001" min="1" max="65535">
+                    </div>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <div class="setting-head">
+                    <span class="setting-title">系统提示词</span>
+                    <span id="promptStatusBadge" class="badge ${tmp39 ? "badge-ok" : "badge-warn"}">${tmp39 ? "已启用" : "未启用"}</span>
+                </div>
+                <div id="promptPathLabel" class="patch-path"><b>文件</b> ${esc(tmp38)}</div>
                 <div class="btns">
-                    <button type="button" class="btn btn-p sm" data-ws-action="addGateway">添加网关</button>
-                    <button type="button" class="btn btn-s sm" data-ws-action="cancelAddGateway">取消</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="promptTemplates">选择模板</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="customPrompt">自定义</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="disablePromptOverride">停用</button>
                 </div>
             </div>
-            <div id="gatewayList"></div>
-        </div>
-        
-        <div class="guide-block" id="multiModelSelectionPanel" style="margin-bottom:10px;display:none">
-            <b>模型选择</b>
-            <div class="fg">
-                <label>主模型 (BYOK1)</label>
-                <select id="cfgMultiPrimaryModel" style="width:100%;font-size:12px;padding:5px 8px">
-                    <option value="" disabled selected>请先添加网关并获取模型</option>
-                </select>
-            </div>
-            <div class="fg" id="cfgMultiPrimaryThinkingEffortRow">
-                <label id="cfgMultiPrimaryThinkingLabel">思考强度</label>
-                <select id="cfgMultiPrimaryThinkingEffort">
-                    <option value="">关闭</option>
-                </select>
-            </div>
-            <div class="fg" style="margin-top:10px">
-                <label>思考模型 (BYOK2)</label>
-                <select id="cfgMultiThinkingModel" style="width:100%;font-size:12px;padding:5px 8px">
-                    <option value="" disabled selected>请先添加网关并获取模型</option>
-                </select>
-            </div>
-            <div class="fg" id="cfgMultiThinkingEffortRow">
-                <label id="cfgMultiThinkingLabel">思考强度</label>
-                <select id="cfgMultiThinkingEffort">
-                    <option value="">关闭</option>
-                </select>
-            </div>
-            <button type="button" class="btn btn-p" data-ws-action="saveMultiGatewayConfig" style="width:100%">保存配置</button>
-        </div>
-        
-        <div class="guide-block" style="margin-bottom:10px">
-            <div class="card-head between" style="margin-bottom:8px;padding:0">
-                <span>系统提示词覆盖</span>
-                <span id="promptStatusBadge" class="badge ${tmp39 ? "badge-ok" : "badge-warn"}">${tmp39 ? "已启用" : "未启用"}</span>
-            </div>
-            <div id="promptPathLabel" class="patch-path" style="margin-bottom:8px"><b>提示词文件</b> ${esc(tmp38)}</div>
-            <div class="btns" style="margin-bottom:8px">
-                <button type="button" class="btn btn-s sm" data-ws-action="promptTemplates">模板</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="customPrompt">自定义</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="disablePromptOverride">停用</button>
-            </div>
-            <div class="guide-note">模板/自定义内容会写入提示词文件；运行中的代理热更新开关，提示词内容按文件变化自动读取，无需重启。</div>
-        </div>
-    </div>
 
-    <!-- TAB 2: Control -->
-    <div class="tab-content" id="tab-control">
-        <div class="card" style="margin-bottom:12px">
-            <div class="card-head">当前激活模型</div>
-            <div style="padding:8px 0">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                    <span style="font-size:11px;color:${tmp16}">主模型 (BYOK1)</span>
-                    <span style="font-family:${tmp24};font-size:12px;color:${tmp15}">${simplePrimaryModel || "未配置"}</span>
+            <div id="customThinkingSettings" class="setting-group hidden">
+                <div class="setting-head">
+                    <div>
+                        <div class="setting-title">自定义思考参数</div>
+                        <div class="section-subtitle">默认交给模型和中转决定</div>
+                    </div>
+                    <label class="tog"><input type="checkbox" id="cfgCustomThinkingEnabled"><span></span></label>
                 </div>
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                    <span style="font-size:11px;color:${tmp16}">思考模型 (BYOK2)</span>
-                    <span style="font-family:${tmp24};font-size:12px;color:${tmp15}">${simpleThinkingModel || "未配置"}</span>
+                <div class="compatibility-note">仅在当前中转支持对应参数时生效。开启表示“请求使用该强度”，不代表中转已经确认生效；明确不支持时代理会自动停止发送。更改后点击上方“保存并应用”。</div>
+                <div id="customThinkingFields" class="model-row hidden" style="margin-top:8px">
+                    <div class="fg" id="cfgMultiPrimaryThinkingEffortRow" style="margin-bottom:0">
+                        <label id="cfgMultiPrimaryThinkingLabel">主模型强度</label>
+                        <select id="cfgMultiPrimaryThinkingEffort"><option value="">关闭</option></select>
+                    </div>
+                    <div class="fg" id="cfgMultiThinkingEffortRow" style="margin-bottom:0">
+                        <label id="cfgMultiThinkingLabel">思考模型强度</label>
+                        <select id="cfgMultiThinkingEffort"><option value="">关闭</option></select>
+                    </div>
                 </div>
-                <div style="font-size:10px;color:${tmp16};margin-top:4px">
-                    你可以在 Devin 中把两个入口分别理解为主模型和思考模型
-                </div>
             </div>
-        </div>
-        <div class="row" style="gap:6px;margin-bottom:12px">
-            <div class="fg" style="flex:1;margin-bottom:0">
-                <label>Hybrid 端口</label>
-                <input type="number" id="cfgHybridPort" value="${esc(String(tmp02.hybridPort))}" placeholder="3006" min="1" max="65535">
-            </div>
-            <div class="fg" style="flex:1;margin-bottom:0">
-                <label>Inference 端口</label>
-                <input type="number" id="cfgInferencePort" value="${esc(String(tmp02.inferencePort))}" placeholder="3001" min="1" max="65535">
-            </div>
-        </div>
-        <div class="btns" style="margin-bottom:12px" id="proxyControlButtons">
-            ${tmp02.running ? "<button type=\"button\" class=\"btn btn-d\" data-ws-action=\"stopProxy\">停止代理</button>" : "<button type=\"button\" class=\"btn btn-p\" data-ws-action=\"startProxy\" data-ws-mode=\"both\">一键启动</button>"}
-        </div>
-        <div class="row between" style="margin-bottom:12px;padding:4px 0">
-            <div class="row">
-                <span style="font-size:11px;color:${tmp16}">自动启动</span>
-                <label class="tog"><input type="checkbox" id="cfgAutoStartProxy" ${tmp5 ? "checked" : ""}><span></span></label>
-            </div>
-            <button type="button" class="btn btn-s sm" data-ws-action="newWindow" style="font-size:10px;padding:3px 8px">新窗口</button>
-        </div>
-        <div class="card" style="margin-bottom:0">
-            <div class="card-head" id="proxyStatusTitle">运行状态</div>
-            <div class="stats">
-                <div class="st"><b id="statPort">${tmp02.hybridPort}</b><small>端口</small></div>
-                <div class="st"><b id="statUptime">${tmp02.running ? formatUptime(tmp02.uptime) : "--"}</b><small>时长</small></div>
-                <div class="st"><b id="statRequests">${tmp02.requestCount}</b><small>请求</small></div>
-            </div>
-        </div>
-    </div>
 
-    <!-- TAB 3: System -->
-    <div class="tab-content" id="tab-system">
-        <div class="card" style="margin-bottom:12px">
-            <div class="card-head between">
-                <span>插件信息</span>
-                <span class="badge badge-ok">v${esc(tmp42)}</span>
+            <div class="setting-group">
+                <div class="setting-head">
+                    <span class="setting-title">补丁</span>
+                    <span id="patchDetailBadge" class="badge ${tmp34}">${tmp35}</span>
+                </div>
+                <input type="hidden" id="patchApiUrl" value="${esc(tmp3)}">
+                <input type="hidden" id="patchInferenceUrl" value="${esc(tmp4)}">
+                <div id="patchPathDisplay" class="patch-path">${tmp6 ? "<b>路径</b> " + esc(tmp6) : "<b>路径</b> 自动检测失败；可手动选择"}</div>
+                <div class="btns" id="patchActionButtons">
+                    <button type="button" class="btn ${patchReady ? "btn-s" : "btn-p"} sm" data-ws-action="applyPatch">${patchReady ? "重新安装" : "安装补丁"}</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="locateExtJs">选择路径</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="clearExtJsPath">自动检测</button>
+                    <button type="button" class="btn btn-s sm" data-ws-action="revertPatch">还原</button>
+                </div>
+                <div id="patchActionState" class="action-state hidden">
+                    <div id="patchActionText" class="action-text"></div>
+                    <div class="action-progress"><div class="action-progress-bar"></div></div>
+                </div>
             </div>
-            <div class="plugin-info">
-                <div class="plugin-info-row"><b>当前安装版本</b><code id="pluginInstalledVersion">v${esc(tmp42)}</code></div>
-                <div class="plugin-info-row"><b>Git 远端地址</b><code id="pluginGitRemote">${esc(tmp43)}</code></div>
+
+            <div class="setting-group">
+                <div class="setting-head">
+                    <span class="setting-title toggle-section collapsed" data-ws-toggle="logBody">运行日志</span>
+                    <button type="button" class="btn btn-s sm" data-ws-action="copyLogs">复制</button>
+                </div>
+                <div id="logBody" class="hidden" style="margin-top:7px">
+                    <div class="log-box" id="logBox" title="拖动右下角可调整日志高度">${tmp36}</div>
+                    <div id="copyToast" style="display:none;text-align:center;color:#34d399;font-size:9px;margin-top:4px">已复制</div>
+                </div>
             </div>
+            <div class="footer-meta">API2Devin v${esc(tmp42)}</div>
         </div>
-        <div class="card" style="margin-bottom:12px">
-            <div class="card-head between">
-                <span>补丁管理</span>
-                <span id="patchBadge" class="badge ${tmp34}">${tmp35}</span>
-            </div>
-            <input type="hidden" id="patchApiUrl" value="${esc(tmp3)}">
-            <input type="hidden" id="patchInferenceUrl" value="${esc(tmp4)}">
-            <div id="patchPathDisplay" class="patch-path">${tmp6 ? "<b>补丁路径</b> " + esc(tmp6) : "<b>补丁路径</b> 自动检测；非默认安装请点“选择路径”"}</div>
-            <div class="btns" style="margin-bottom:8px">
-                <button type="button" class="btn btn-s sm" data-ws-action="locateExtJs">选择路径</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="clearExtJsPath">自动检测</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="refreshPatchStatus">刷新状态</button>
-            </div>
-            <div class="btns" id="patchActionButtons">
-                <button type="button" class="btn btn-p sm" data-ws-action="applyPatch">安装补丁</button>
-                <button type="button" class="btn btn-s sm" data-ws-action="revertPatch">还原</button>
-            </div>
-            <div id="patchActionState" class="action-state hidden">
-                <div id="patchActionText" class="action-text"></div>
-                <div class="action-progress"><div class="action-progress-bar"></div></div>
-            </div>
-        </div>
-        <div class="card" style="margin-bottom:0">
-            <div class="card-head between">
-                <span class="toggle-section" data-ws-toggle="logBody">日志</span>
-                <button type="button" class="btn btn-s sm" data-ws-action="copyLogs" style="font-size:10px;padding:3px 6px">复制</button>
-            </div>
-            <div id="logBody">
-                <div class="log-box" id="logBox" title="拖动右下角可调整日志显示高度">${tmp36}</div>
-                <div class="empty-text" style="margin-top:4px">提示：拖动日志框右下角可调整上下长度。</div>
-                <div id="copyToast" style="display:none;text-align:center;color:#34d399;font-size:10px;margin-top:4px">已复制</div>
-            </div>
-        </div>
-    </div>
+    </section>
 </div>
 
 <script nonce="${tmp10}" src="${tmp12}"></script>

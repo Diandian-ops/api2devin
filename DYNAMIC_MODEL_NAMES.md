@@ -91,7 +91,7 @@ Devin Desktop 的 extension.js 是压缩混淆的，需要：
    ```
    在 Devin 中选择：
    - "Claude Opus 4 BYOK" → 使用你配置的主模型
-   - "Claude Opus 4 Thinking BYOK" → 使用你配置的主模型（带思考强度）
+   - "Claude Opus 4 Thinking BYOK" → 使用你配置的思考模型；只有在高级设置中主动开启且中转支持时才附加自定义思考参数
    ```
 
 3. **添加快速测试功能**

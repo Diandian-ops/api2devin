@@ -5,34 +5,34 @@ const GEMINI_THINKING_LEVELS = ['', 'minimal', 'low', 'medium', 'high'];
 
 const PROVIDER_OPTIONS = {
   claude: [
-    ['', '关闭 · 不启用思考'],
-    ['low', '低 · budget 5k / adaptive'],
-    ['medium', '中 · 推荐平衡'],
-    ['high', '高 · 复杂分析/代码'],
-    ['xhigh', '极高 · Opus 4.7/4.8'],
-    ['max', 'Max · Claude 最深思考']
+    ['', '关闭'],
+    ['low', '低 · 速度优先'],
+    ['medium', '中 · 推荐'],
+    ['high', '高 · 深度分析'],
+    ['xhigh', '极高 · 复杂任务'],
+    ['max', 'Max · 最深思考']
   ],
   gpt: [
-    ['', '关闭 · 不启用 reasoning'],
-    ['low', '低 · reasoning.effort=low'],
-    ['medium', '中 · reasoning.effort=medium'],
-    ['high', '高 · reasoning.effort=high'],
-    ['xhigh', '极高 · reasoning.effort=xhigh']
+    ['', '关闭'],
+    ['low', '低 · 速度优先'],
+    ['medium', '中 · 推荐'],
+    ['high', '高 · 深度分析'],
+    ['xhigh', '极高 · 复杂任务']
   ],
   gpt56: [
-    ['', '关闭 · 不启用 reasoning'],
-    ['low', '低 · reasoning.effort=low'],
-    ['medium', '中 · reasoning.effort=medium'],
-    ['high', '高 · reasoning.effort=high'],
-    ['xhigh', '极高 · reasoning.effort=xhigh'],
-    ['max', 'Max · GPT-5.6 最深推理']
+    ['', '关闭'],
+    ['low', '低 · 速度优先'],
+    ['medium', '中 · 推荐'],
+    ['high', '高 · 深度分析'],
+    ['xhigh', '极高 · 复杂任务'],
+    ['max', 'Max · 最深推理']
   ],
   gemini: [
-    ['', '默认 · medium（API 默认，不覆盖）'],
-    ['minimal', 'Minimal · 最低思考 / 最低延迟'],
-    ['low', 'Low · 速度优先'],
-    ['medium', 'Medium · 推荐平衡'],
-    ['high', 'High · 最深推理']
+    ['', '默认'],
+    ['minimal', '最低 · 延迟优先'],
+    ['low', '低 · 速度优先'],
+    ['medium', '中 · 推荐'],
+    ['high', '高 · 最深推理']
   ]
 };
 
@@ -119,15 +119,6 @@ function buildThinkingEffortOptionsHtml(model, current) {
 }
 
 function getThinkingIntensityHint(provider) {
-  if (provider === 'gpt') {
-    return 'GPT · reasoning.effort';
-  }
-  if (provider === 'gemini') {
-    return 'Gemini 3.5 Flash · thinking_level';
-  }
-  if (provider === 'claude') {
-    return 'Claude · adaptive / budget_tokens';
-  }
   return '思考强度';
 }
 

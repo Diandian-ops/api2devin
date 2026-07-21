@@ -69,7 +69,7 @@ class ProxyManager {
     this.proxyRoot = this.findProxyRoot();
     this.migrateUserConfigIfNeeded();
     this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.statusBar.command = "devin-byok-bridge.startProxy";
+    this.statusBar.command = "api2devin.startProxy";
     this.updateStatusBar();
     this.statusBar.show();
     tmp0.subscriptions.push(this.statusBar);
@@ -82,11 +82,11 @@ class ProxyManager {
       const tmp02 = this.externalProxy ? "(共享)" : "";
       this.statusBar.text = "$(cloud) BYOK Bridge: 运行中" + tmp02;
       this.statusBar.tooltip = this.externalProxy ? "代理运行中 | 端口 " + tmp1 + " | 来自其他窗口" : "Port " + tmp1 + " | PID " + this.hybridProcess?.pid + " | " + this.requestCount + " 请求";
-      this.statusBar.command = "devin-byok-bridge.stopProxy";
+      this.statusBar.command = "api2devin.stopProxy";
     } else {
       this.statusBar.text = "$(cloud) BYOK Bridge: 已停止";
       this.statusBar.tooltip = "点击启动代理 (Port " + tmp1 + ")";
-      this.statusBar.command = "devin-byok-bridge.startProxy";
+      this.statusBar.command = "api2devin.startProxy";
     }
   }
   findProxyRoot() {
@@ -444,7 +444,7 @@ class ProxyManager {
   writeEnvConfig(tmp0) {
     const tmp1 = this.getEnvFilePath();
     const tmp2 = this.readEnvConfig();
-    const tmp3 = new Set(["ANTHROPIC_API_HOST", "ANTHROPIC_API_KEY", "ANTHROPIC_API_PATH", "OPENAI_API_HOST", "OPENAI_API_KEY", "OPENAI_API_PATH", "OPENAI_SERVICE_TIER", "OPENAI_REASONING_MODE", "HYBRID_PORT", "INFERENCE_PORT", "DEFAULT_MODEL", "MAX_TOKENS", "OPENAI_REASONING_EFFORT", "OPENAI_THINKING_ENABLED", "COMPLETION_TIMEOUT_MS", "SYSTEM_PROMPT_OVERRIDE", "SYSTEM_PROMPT_PATH", "BYOK1_ANTHROPIC_API_HOST", "BYOK1_ANTHROPIC_API_KEY", "BYOK1_ANTHROPIC_API_PATH", "BYOK1_OPENAI_API_HOST", "BYOK1_OPENAI_API_KEY", "BYOK1_OPENAI_API_PATH", "BYOK1_OPENAI_SERVICE_TIER", "BYOK1_OPENAI_REASONING_MODE", "BYOK1_MODEL", "BYOK1_THINKING_EFFORT", "BYOK2_ANTHROPIC_API_HOST", "BYOK2_ANTHROPIC_API_KEY", "BYOK2_ANTHROPIC_API_PATH", "BYOK2_OPENAI_API_HOST", "BYOK2_OPENAI_API_KEY", "BYOK2_OPENAI_API_PATH", "BYOK2_OPENAI_SERVICE_TIER", "BYOK2_OPENAI_REASONING_MODE", "BYOK2_MODEL", "BYOK2_THINKING_EFFORT"]);
+    const tmp3 = new Set(["ANTHROPIC_API_HOST", "ANTHROPIC_API_KEY", "ANTHROPIC_API_PATH", "OPENAI_API_HOST", "OPENAI_API_KEY", "OPENAI_API_PATH", "OPENAI_SERVICE_TIER", "OPENAI_REASONING_MODE", "GATEWAY_AUTH_MODE", "HYBRID_PORT", "INFERENCE_PORT", "DEFAULT_MODEL", "MAX_TOKENS", "OPENAI_REASONING_EFFORT", "OPENAI_THINKING_ENABLED", "COMPLETION_TIMEOUT_MS", "SYSTEM_PROMPT_OVERRIDE", "SYSTEM_PROMPT_PATH", "BYOK1_ANTHROPIC_API_HOST", "BYOK1_ANTHROPIC_API_KEY", "BYOK1_ANTHROPIC_API_PATH", "BYOK1_OPENAI_API_HOST", "BYOK1_OPENAI_API_KEY", "BYOK1_OPENAI_API_PATH", "BYOK1_OPENAI_SERVICE_TIER", "BYOK1_OPENAI_REASONING_MODE", "BYOK1_GATEWAY_AUTH_MODE", "BYOK1_MODEL", "BYOK1_THINKING_EFFORT", "BYOK2_ANTHROPIC_API_HOST", "BYOK2_ANTHROPIC_API_KEY", "BYOK2_ANTHROPIC_API_PATH", "BYOK2_OPENAI_API_HOST", "BYOK2_OPENAI_API_KEY", "BYOK2_OPENAI_API_PATH", "BYOK2_OPENAI_SERVICE_TIER", "BYOK2_OPENAI_REASONING_MODE", "BYOK2_GATEWAY_AUTH_MODE", "BYOK2_MODEL", "BYOK2_THINKING_EFFORT"]);
     const tmp4 = Object.entries(tmp2).filter(([tmp02]) => !tmp3.has(tmp02) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(tmp02)).map(([tmp02, tmp13]) => tmp02 + "=" + tmp13);
     const tmp6 = ["# Devin BYOK Bridge 配置（由扩展管理）"];
     const fn = (arg0, arg1) => {
@@ -463,6 +463,7 @@ class ProxyManager {
       }
       tmp6.push(arg0 + "OPENAI_SERVICE_TIER=" + (tmp0[arg0 + "OPENAI_SERVICE_TIER"] || ""));
       tmp6.push(arg0 + "OPENAI_REASONING_MODE=" + (tmp0[arg0 + "OPENAI_REASONING_MODE"] || ""));
+      tmp6.push(arg0 + "GATEWAY_AUTH_MODE=" + (tmp0[arg0 + "GATEWAY_AUTH_MODE"] || ""));
       tmp6.push(arg0 + "MODEL=" + (tmp0[arg0 + "MODEL"] || ""));
       tmp6.push(arg0 + "THINKING_EFFORT=" + (tmp0[arg0 + "THINKING_EFFORT"] || ""));
     };
@@ -481,6 +482,7 @@ class ProxyManager {
     }
     tmp6.push("OPENAI_SERVICE_TIER=" + (tmp0.BYOK1_OPENAI_SERVICE_TIER || tmp0.OPENAI_SERVICE_TIER || ""));
     tmp6.push("OPENAI_REASONING_MODE=" + (tmp0.BYOK1_OPENAI_REASONING_MODE || tmp0.OPENAI_REASONING_MODE || ""));
+    tmp6.push("GATEWAY_AUTH_MODE=" + (tmp0.BYOK1_GATEWAY_AUTH_MODE || tmp0.GATEWAY_AUTH_MODE || ""));
     tmp6.push("", "# ─── 通用 ───");
     tmp6.push("HYBRID_PORT=" + this.getHybridPort(tmp0).toString());
     tmp6.push("INFERENCE_PORT=" + this.getInferencePort(tmp0).toString());
@@ -516,6 +518,7 @@ class ProxyManager {
       BYOK1_OPENAI_API_PATH: tmp0.BYOK1_OPENAI_API_PATH || "",
       BYOK1_OPENAI_SERVICE_TIER: tmp0.BYOK1_OPENAI_SERVICE_TIER || "",
       BYOK1_OPENAI_REASONING_MODE: tmp0.BYOK1_OPENAI_REASONING_MODE || "",
+      BYOK1_GATEWAY_AUTH_MODE: tmp0.BYOK1_GATEWAY_AUTH_MODE || "",
       BYOK1_MODEL: tmp0.BYOK1_MODEL || "",
       BYOK1_THINKING_EFFORT: tmp0.BYOK1_THINKING_EFFORT || "",
       BYOK2_ANTHROPIC_API_HOST: tmp0.BYOK2_ANTHROPIC_API_HOST ? this.stripProtocol(tmp0.BYOK2_ANTHROPIC_API_HOST) : "",
@@ -526,6 +529,7 @@ class ProxyManager {
       BYOK2_OPENAI_API_PATH: tmp0.BYOK2_OPENAI_API_PATH || "",
       BYOK2_OPENAI_SERVICE_TIER: tmp0.BYOK2_OPENAI_SERVICE_TIER || "",
       BYOK2_OPENAI_REASONING_MODE: tmp0.BYOK2_OPENAI_REASONING_MODE || "",
+      BYOK2_GATEWAY_AUTH_MODE: tmp0.BYOK2_GATEWAY_AUTH_MODE || "",
       BYOK2_MODEL: tmp0.BYOK2_MODEL || "",
       BYOK2_THINKING_EFFORT: tmp0.BYOK2_THINKING_EFFORT || "",
       ANTHROPIC_API_HOST: tmp0.BYOK1_ANTHROPIC_API_HOST ? this.stripProtocol(tmp0.BYOK1_ANTHROPIC_API_HOST) : tmp0.ANTHROPIC_API_HOST ? this.stripProtocol(tmp0.ANTHROPIC_API_HOST) : "",
@@ -536,6 +540,7 @@ class ProxyManager {
       OPENAI_API_PATH: tmp0.BYOK1_OPENAI_API_PATH || tmp0.OPENAI_API_PATH || "",
       OPENAI_SERVICE_TIER: tmp0.BYOK1_OPENAI_SERVICE_TIER || tmp0.OPENAI_SERVICE_TIER || "",
       OPENAI_REASONING_MODE: tmp0.BYOK1_OPENAI_REASONING_MODE || tmp0.OPENAI_REASONING_MODE || "",
+      GATEWAY_AUTH_MODE: tmp0.BYOK1_GATEWAY_AUTH_MODE || tmp0.GATEWAY_AUTH_MODE || "",
       OPENAI_REASONING_EFFORT: Object.prototype.hasOwnProperty.call(tmp0, "OPENAI_REASONING_EFFORT") ? tmp0.OPENAI_REASONING_EFFORT : tmp0.BYOK1_THINKING_EFFORT || "",
       OPENAI_THINKING_ENABLED: tmp0.OPENAI_THINKING_ENABLED === "true" || !!tmp0.BYOK1_THINKING_EFFORT,
       COMPLETION_TIMEOUT_MS: this.getCompletionTimeoutMs(tmp0),

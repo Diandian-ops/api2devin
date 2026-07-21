@@ -5,6 +5,7 @@ import { slotField, sanitizeThinkingEffort } from "./byok-slots.js";
 import { clearSystemPromptCache } from "./system-prompt.js";
 const _initialAnthropicHost = stripProtocol(process.env.ANTHROPIC_API_HOST || "");
 const _initialOpenaiHost = stripProtocol(process.env.OPENAI_API_HOST || _initialAnthropicHost);
+const _initialCustomThinkingEnabled = String(process.env.CUSTOM_THINKING_ENABLED || "").trim().toLowerCase() === "true";
 function readSlotConfigFromEnv(arg0, tmp1 = null) {
   const tmp2 = stripProtocol(process.env[slotField(arg0, "ANTHROPIC_API_HOST")] || "");
   const tmp3 = process.env[slotField(arg0, "ANTHROPIC_API_KEY")] || "";
@@ -13,9 +14,10 @@ function readSlotConfigFromEnv(arg0, tmp1 = null) {
   const tmp6 = process.env[slotField(arg0, "OPENAI_API_KEY")] || tmp3;
   const tmp7 = process.env[slotField(arg0, "OPENAI_API_PATH")] || "/v1/responses";
   const tmp8 = String(process.env[slotField(arg0, "MODEL")] || "").trim();
-  const tmp9 = sanitizeThinkingEffort(process.env[slotField(arg0, "THINKING_EFFORT")] || "");
+  const tmp9 = _initialCustomThinkingEnabled ? sanitizeThinkingEffort(process.env[slotField(arg0, "THINKING_EFFORT")] || "") : "";
   const tmp11 = sanitizeOpenAIServiceTier(process.env[slotField(arg0, "OPENAI_SERVICE_TIER")] || (arg0 === 1 ? process.env.OPENAI_SERVICE_TIER || "" : ""));
   const tmp12 = sanitizeOpenAIReasoningMode(process.env[slotField(arg0, "OPENAI_REASONING_MODE")] || (arg0 === 1 ? process.env.OPENAI_REASONING_MODE || "" : ""));
+  const tmp13 = sanitizeGatewayAuthMode(process.env[slotField(arg0, "GATEWAY_AUTH_MODE")] || (arg0 === 1 ? process.env.GATEWAY_AUTH_MODE || "" : ""));
   const tmp10 = {
     anthropicHost: tmp2,
     anthropicApiPath: tmp4,
@@ -26,7 +28,8 @@ function readSlotConfigFromEnv(arg0, tmp1 = null) {
     model: tmp8,
     thinkingEffort: tmp9,
     serviceTier: tmp11,
-    reasoningMode: tmp12
+    reasoningMode: tmp12,
+    authMode: tmp13
   };
   if (!tmp10.anthropicHost && !tmp10.anthropicApiKey && !tmp10.model && tmp1) {
     return {
@@ -43,9 +46,10 @@ const _legacySlotFallback = {
   openaiApiPath: process.env.OPENAI_API_PATH || "/v1/responses",
   openaiApiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || "",
   model: process.env.DEFAULT_MODEL || "",
-  thinkingEffort: sanitizeThinkingEffort(process.env.BYOK1_THINKING_EFFORT || process.env.OPENAI_REASONING_EFFORT || ""),
+  thinkingEffort: _initialCustomThinkingEnabled ? sanitizeThinkingEffort(process.env.BYOK1_THINKING_EFFORT || process.env.OPENAI_REASONING_EFFORT || "") : "",
   serviceTier: sanitizeOpenAIServiceTier(process.env.BYOK1_OPENAI_SERVICE_TIER || process.env.OPENAI_SERVICE_TIER || ""),
-  reasoningMode: sanitizeOpenAIReasoningMode(process.env.BYOK1_OPENAI_REASONING_MODE || process.env.OPENAI_REASONING_MODE || "")
+  reasoningMode: sanitizeOpenAIReasoningMode(process.env.BYOK1_OPENAI_REASONING_MODE || process.env.OPENAI_REASONING_MODE || ""),
+  authMode: sanitizeGatewayAuthMode(process.env.BYOK1_GATEWAY_AUTH_MODE || process.env.GATEWAY_AUTH_MODE || "")
 };
 const _emptySlot = {
   anthropicHost: "",
@@ -57,7 +61,8 @@ const _emptySlot = {
   model: "",
   thinkingEffort: "",
   serviceTier: "",
-  reasoningMode: ""
+  reasoningMode: "",
+  authMode: ""
 };
 function sanitizeReasoningEffort(arg0) {
   const tmp1 = String(arg0 ?? "").trim();
@@ -74,6 +79,10 @@ function sanitizeOpenAIServiceTier(arg0) {
 function sanitizeOpenAIReasoningMode(arg0) {
   const tmp1 = String(arg0 ?? "").trim().toLowerCase();
   return ["standard", "pro"].includes(tmp1) ? tmp1 : "";
+}
+function sanitizeGatewayAuthMode(arg0) {
+  const tmp1 = String(arg0 ?? "").trim().toLowerCase();
+  return ["both", "bearer", "x-api-key"].includes(tmp1) ? tmp1 : "";
 }
 function sanitizeBooleanString(arg0) {
   return String(arg0 ?? "").trim().toLowerCase() === "true";
@@ -96,8 +105,10 @@ let _runtimeConfig = {
   openaiApiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || "",
   openaiServiceTier: sanitizeOpenAIServiceTier(process.env.OPENAI_SERVICE_TIER || ""),
   openaiReasoningMode: sanitizeOpenAIReasoningMode(process.env.OPENAI_REASONING_MODE || ""),
-  openaiReasoningEffort: Object.prototype.hasOwnProperty.call(process.env, "OPENAI_REASONING_EFFORT") ? sanitizeReasoningEffort(process.env.OPENAI_REASONING_EFFORT) : "",
-  openaiThinkingEnabled: sanitizeBooleanString(process.env.OPENAI_THINKING_ENABLED),
+  gatewayAuthMode: sanitizeGatewayAuthMode(process.env.GATEWAY_AUTH_MODE || ""),
+  openaiReasoningEffort: _initialCustomThinkingEnabled && Object.prototype.hasOwnProperty.call(process.env, "OPENAI_REASONING_EFFORT") ? sanitizeReasoningEffort(process.env.OPENAI_REASONING_EFFORT) : "",
+  openaiThinkingEnabled: _initialCustomThinkingEnabled && sanitizeBooleanString(process.env.OPENAI_THINKING_ENABLED),
+  customThinkingEnabled: _initialCustomThinkingEnabled,
   completionTimeoutMs: sanitizePositiveInteger(process.env.COMPLETION_TIMEOUT_MS, 12000, 2000, 60000),
   systemPromptOverride: sanitizeBooleanString(process.env.SYSTEM_PROMPT_OVERRIDE),
   systemPromptPath: String(process.env.SYSTEM_PROMPT_PATH || "").trim(),
@@ -116,6 +127,7 @@ function buildProviderFromSlot(arg0) {
       host: tmp1,
       apiPath: arg0.anthropicApiPath || "/v1/messages",
       apiKey: arg0.anthropicApiKey || "",
+      authMode: arg0.authMode || "",
       parsed: tmp3,
       useHttp: isLocalTarget(tmp1)
     },
@@ -123,6 +135,7 @@ function buildProviderFromSlot(arg0) {
       host: tmp2,
       apiPath: arg0.openaiApiPath || "/v1/responses",
       apiKey: arg0.openaiApiKey || arg0.anthropicApiKey || "",
+      authMode: arg0.authMode || "",
       parsed: tmp4,
       useHttp: isLocalTarget(tmp2)
     }
@@ -136,6 +149,7 @@ function syncLegacyFromByok1() {
   _runtimeConfig.openaiHost = tmp0.openaiHost;
   _runtimeConfig.openaiApiPath = tmp0.openaiApiPath;
   _runtimeConfig.openaiApiKey = tmp0.openaiApiKey;
+  _runtimeConfig.gatewayAuthMode = tmp0.authMode;
   _runtimeConfig.defaultModel = tmp0.model;
 }
 syncLegacyFromByok1();
@@ -206,6 +220,7 @@ function applySlotPatch(arg0, arg1) {
   tmp2 = setSlotStringField(arg0, tmp3 + "OPENAI_API_KEY", arg1, "openaiApiKey") || tmp2;
   tmp2 = setSlotStringField(arg0, tmp3 + "OPENAI_SERVICE_TIER", arg1, "serviceTier", sanitizeOpenAIServiceTier) || tmp2;
   tmp2 = setSlotStringField(arg0, tmp3 + "OPENAI_REASONING_MODE", arg1, "reasoningMode", sanitizeOpenAIReasoningMode) || tmp2;
+  tmp2 = setSlotStringField(arg0, tmp3 + "GATEWAY_AUTH_MODE", arg1, "authMode", sanitizeGatewayAuthMode) || tmp2;
   if (Object.prototype.hasOwnProperty.call(arg0, tmp3 + "MODEL")) {
     const tmp0 = typeof arg0[tmp3 + "MODEL"] === "string" ? arg0[tmp3 + "MODEL"].trim() : "";
     const tmp1 = arg1 === 2 ? "byok2" : "byok1";
@@ -232,6 +247,13 @@ export function setRuntimeConfig(arg0) {
     _runtimeConfig.maxTokens = arg0.maxTokens;
   }
   let tmp1 = false;
+  if (Object.prototype.hasOwnProperty.call(arg0, "CUSTOM_THINKING_ENABLED")) {
+    const enabled = arg0.CUSTOM_THINKING_ENABLED === true || sanitizeBooleanString(arg0.CUSTOM_THINKING_ENABLED);
+    if (_runtimeConfig.customThinkingEnabled !== enabled) {
+      _runtimeConfig.customThinkingEnabled = enabled;
+      tmp1 = true;
+    }
+  }
   tmp1 = applySlotPatch(arg0, 1) || tmp1;
   tmp1 = applySlotPatch(arg0, 2) || tmp1;
   tmp1 = setStringField(arg0, "ANTHROPIC_API_HOST", "anthropicHost", stripProtocol) || tmp1;
@@ -242,6 +264,7 @@ export function setRuntimeConfig(arg0) {
   tmp1 = setStringField(arg0, "OPENAI_API_KEY", "openaiApiKey") || tmp1;
   tmp1 = setStringField(arg0, "OPENAI_SERVICE_TIER", "openaiServiceTier", sanitizeOpenAIServiceTier) || tmp1;
   tmp1 = setStringField(arg0, "OPENAI_REASONING_MODE", "openaiReasoningMode", sanitizeOpenAIReasoningMode) || tmp1;
+  tmp1 = setStringField(arg0, "GATEWAY_AUTH_MODE", "gatewayAuthMode", sanitizeGatewayAuthMode) || tmp1;
   if (Object.prototype.hasOwnProperty.call(arg0, "DEFAULT_MODEL")) {
     const tmp0 = typeof arg0.DEFAULT_MODEL === "string" ? arg0.DEFAULT_MODEL.trim() : "";
     if (_runtimeConfig.byok1.model !== tmp0) {
@@ -251,7 +274,13 @@ export function setRuntimeConfig(arg0) {
   }
   setStringField(arg0, "OPENAI_REASONING_EFFORT", "openaiReasoningEffort", sanitizeReasoningEffort);
   if (Object.prototype.hasOwnProperty.call(arg0, "OPENAI_THINKING_ENABLED")) {
-    _runtimeConfig.openaiThinkingEnabled = arg0.OPENAI_THINKING_ENABLED === true || sanitizeBooleanString(arg0.OPENAI_THINKING_ENABLED);
+    _runtimeConfig.openaiThinkingEnabled = _runtimeConfig.customThinkingEnabled && (arg0.OPENAI_THINKING_ENABLED === true || sanitizeBooleanString(arg0.OPENAI_THINKING_ENABLED));
+  }
+  if (!_runtimeConfig.customThinkingEnabled) {
+    _runtimeConfig.byok1.thinkingEffort = "";
+    _runtimeConfig.byok2.thinkingEffort = "";
+    _runtimeConfig.openaiReasoningEffort = "";
+    _runtimeConfig.openaiThinkingEnabled = false;
   }
   let tmp0 = false;
   if (Object.prototype.hasOwnProperty.call(arg0, "SYSTEM_PROMPT_OVERRIDE")) {
@@ -391,14 +420,26 @@ function httpsGetJson(arg0, arg1, arg2, tmp3 = 15000, tmp4 = false) {
     tmp42.end();
   });
 }
+function modelListPathFromApiPath(arg0) {
+  const tmp1 = String(arg0 || "/v1").replace(/\/+$/, "");
+  const tmp2 = tmp1.replace(/\/chat\/completions$/i, "").replace(/\/(?:messages|responses|models|completions)$/i, "");
+  return (tmp2 || "/v1") + "/models";
+}
+function providerAuthHeaders(arg0, arg1, arg2) {
+  const tmp1 = arg1 || (arg2 === "openai" ? "bearer" : "x-api-key");
+  return {
+    ...(tmp1 === "both" || tmp1 === "x-api-key" ? { "x-api-key": arg0 } : {}),
+    ...(tmp1 === "both" || tmp1 === "bearer" ? { authorization: "Bearer " + arg0 } : {})
+  };
+}
 async function fetchAnthropicModels(tmp0 = null) {
   const tmp1 = getProviderConfig(tmp0).anthropic;
   if (!tmp1.apiKey) {
     return [];
   }
   try {
-    const tmp02 = await httpsGetJson(tmp1.host, "/v1/models", {
-      "x-api-key": tmp1.apiKey,
+    const tmp02 = await httpsGetJson(tmp1.host, modelListPathFromApiPath(tmp1.apiPath), {
+      ...providerAuthHeaders(tmp1.apiKey, tmp1.authMode, "anthropic"),
       "anthropic-version": "2023-06-01"
     }, 15000, tmp1.useHttp);
     const tmp12 = (tmp02.data || tmp02.models || []).map(arg0 => ({
@@ -420,9 +461,7 @@ async function fetchOpenAIModels(tmp0 = null) {
     return [];
   }
   try {
-    const tmp02 = await httpsGetJson(tmp1.host, "/v1/models", {
-      authorization: "Bearer " + tmp1.apiKey
-    }, 15000, tmp1.useHttp);
+    const tmp02 = await httpsGetJson(tmp1.host, modelListPathFromApiPath(tmp1.apiPath), providerAuthHeaders(tmp1.apiKey, tmp1.authMode, "openai"), 15000, tmp1.useHttp);
     const tmp12 = (tmp02.data || tmp02.models || []).map(arg0 => ({
       id: arg0.id,
       name: arg0.id,

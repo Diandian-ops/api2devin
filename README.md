@@ -23,6 +23,8 @@ Devin Desktop BYOK 桥接插件 — 使用自己的 API Key 连接 Claude / GPT 
 4. 点击 **一键启动**
 5. **补丁管理** → **安装补丁** → **重载窗口**
 
+Base URL 可以只填域名，也可以粘贴带 `/v1`、`/v1/messages`、`/v1/responses` 或 `/v1/chat/completions` 的地址。插件会自动探测模型列表入口、鉴权方式和对应的请求路径，并在运行时按所选模型切换 Anthropic/OpenAI 兼容协议。
+
 ### 3. 使用模型
 
 在 Devin Desktop 中选择：
@@ -53,14 +55,22 @@ Devin Desktop BYOK 桥接插件 — 使用自己的 API Key 连接 Claude / GPT 
 BYOK1_ANTHROPIC_API_HOST=https://api.anthropic.com
 BYOK1_ANTHROPIC_API_KEY=sk-ant-xxx
 BYOK1_MODEL=claude-opus-4-8
-BYOK1_THINKING_EFFORT=medium
 
 # BYOK #2
 BYOK2_ANTHROPIC_API_HOST=https://api.anthropic.com
 BYOK2_ANTHROPIC_API_KEY=sk-ant-xxx
 BYOK2_MODEL=claude-opus-4-8
+```
+
+自定义思考参数默认关闭。仅在确认中转支持时开启：
+
+```bash
+CUSTOM_THINKING_ENABLED=true
+BYOK1_THINKING_EFFORT=medium
 BYOK2_THINKING_EFFORT=high
 ```
+
+中转明确拒绝思考参数时，代理会自动去掉参数重试并缓存该“中转 + 模型”的不支持状态。
 
 ## 常见问题
 

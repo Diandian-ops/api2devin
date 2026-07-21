@@ -9,16 +9,16 @@ npm run build
 ```
 
 这会：
-1. 运行所有测试（44 项单元测试）
-2. 打包生成 `devin-byok-bridge-2.6.1.vsix`
+1. 运行所有测试（54 项单元测试）
+2. 打包生成 `api2devin-2.6.3.vsix`
 
 ## 安装插件
 
 ### 方式一：从 VSIX 安装（推荐）
 
-1. 在 Devin Desktop / VS Code 中按 `Ctrl+Shift+P`
+1. 在 Devin Desktop / VS Code 中按 `Cmd+Shift+P`（Windows/Linux 为 `Ctrl+Shift+P`）
 2. 选择 **Extensions: Install from VSIX...**
-3. 选择生成的 `devin-byok-bridge-2.6.1.vsix` 文件
+3. 选择生成的 `api2devin-2.6.3.vsix` 文件
 4. 重载窗口
 
 ### 方式二：从源码目录安装

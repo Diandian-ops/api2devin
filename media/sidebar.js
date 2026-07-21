@@ -3,7 +3,7 @@
   let tmp1 = "";
   const tmp2 = new Map();
   let tmp3 = tmp0.getState() || {};
-  let gatewayConfig = { gateways: [], activeSlots: { byok1: null, byok2: null } };
+  let gatewayConfig = { gateways: [], activeSlots: { byok1: null, byok2: null }, customThinkingEnabled: false };
   const fn = () => ({
     1: {
       options: Array.isArray(tmp3.cachedModelOptions1) ? tmp3.cachedModelOptions1 : [],
@@ -20,24 +20,23 @@
     const container = fn4("gatewayList");
     if (!container) return;
     if (!gatewayConfig.gateways.length) {
-      container.innerHTML = '<div style="font-size:11px;color:#888;text-align:center;padding:12px">暂无网关，点击"+ 添加"开始配置</div>';
+      container.innerHTML = '<div style="font-size:10px;color:#888;text-align:center;padding:10px">暂无网关，点击“+ 网关”开始配置</div>';
       fn4("multiModelSelectionPanel").style.display = "none";
       return;
     }
     container.innerHTML = gatewayConfig.gateways.map(gw => {
       const modelCount = gw.models.length;
       const hasModels = modelCount > 0;
-      return `<div class="guide-block" style="margin-bottom:8px;padding:8px;border-left:3px solid #0ea5e9">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <b style="font-size:12px">${fn6(gw.name)}</b>
-          <div style="display:flex;gap:4px">
-            <button type="button" class="btn btn-s sm" data-ws-action="editGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">编辑</button>
-            <button type="button" class="btn btn-s sm" data-ws-action="deleteGateway" data-gateway-id="${gw.id}" style="font-size:10px;padding:2px 6px">删除</button>
-          </div>
+      return `<div class="gateway-row">
+        <div class="gateway-main">
+          <div class="gateway-name">${fn6(gw.name)}</div>
+          <div class="gateway-meta">${fn6(gw.baseUrl)} · ${hasModels ? modelCount + ' 个模型' : '未加载模型'}</div>
         </div>
-        <div style="font-size:10px;color:#888;margin-bottom:4px">${fn6(gw.baseUrl)}</div>
-        <div style="font-size:10px;color:#888;margin-bottom:6px">模型: ${hasModels ? modelCount + ' 个' : '未加载'}</div>
-        <button type="button" class="btn btn-s sm" data-ws-action="fetchGatewayModels" data-gateway-id="${gw.id}" style="width:100%;font-size:11px">${hasModels ? '重新获取' : '获取模型列表'}</button>
+        <div class="gateway-actions">
+          <button type="button" class="btn btn-s sm" data-ws-action="fetchGatewayModels" data-gateway-id="${gw.id}">${hasModels ? '更新' : '加载'}</button>
+          <button type="button" class="btn btn-s sm" data-ws-action="editGateway" data-gateway-id="${gw.id}">编辑</button>
+          <button type="button" class="icon-btn" data-ws-action="deleteGateway" data-gateway-id="${gw.id}" aria-label="删除网关" title="删除网关">×</button>
+        </div>
       </div>`;
     }).join('');
     updateMultiModelDropdowns();
@@ -57,6 +56,8 @@
       primarySelect.innerHTML = '<option value="" disabled selected>请先获取模型列表</option>';
       thinkingSelect.innerHTML = '<option value="" disabled selected>请先获取模型列表</option>';
       fn4("multiModelSelectionPanel").style.display = "none";
+      const customThinkingSettings = fn4("customThinkingSettings");
+      if (customThinkingSettings) customThinkingSettings.classList.add("hidden");
       return;
     }
     const buildOptions = (selected) => {
@@ -68,7 +69,41 @@
     };
     primarySelect.innerHTML = buildOptions(gatewayConfig.activeSlots.byok1);
     thinkingSelect.innerHTML = buildOptions(gatewayConfig.activeSlots.byok2);
+    updateMultiThinkingOptions("primary", gatewayConfig.activeSlots.byok1?.thinkingEffort);
+    updateMultiThinkingOptions("thinking", gatewayConfig.activeSlots.byok2?.thinkingEffort);
+    const customThinkingToggle = fn4("cfgCustomThinkingEnabled");
+    if (customThinkingToggle) customThinkingToggle.checked = gatewayConfig.customThinkingEnabled === true;
+    const customThinkingSettings = fn4("customThinkingSettings");
+    if (customThinkingSettings) customThinkingSettings.classList.remove("hidden");
+    updateCustomThinkingVisibility();
     fn4("multiModelSelectionPanel").style.display = "block";
+  }
+  function updateCustomThinkingVisibility() {
+    const customThinkingToggle = fn4("cfgCustomThinkingEnabled");
+    const customThinkingFields = fn4("customThinkingFields");
+    if (customThinkingFields) {
+      customThinkingFields.classList.toggle("hidden", !customThinkingToggle?.checked);
+    }
+  }
+  function updateMultiThinkingOptions(kind, selectedEffort) {
+    const isPrimary = kind === "primary";
+    const modelSelect = fn4(isPrimary ? "cfgMultiPrimaryModel" : "cfgMultiThinkingModel");
+    const effortSelect = fn4(isPrimary ? "cfgMultiPrimaryThinkingEffort" : "cfgMultiThinkingEffort");
+    const effortRow = fn4(isPrimary ? "cfgMultiPrimaryThinkingEffortRow" : "cfgMultiThinkingEffortRow");
+    const effortLabel = fn4(isPrimary ? "cfgMultiPrimaryThinkingLabel" : "cfgMultiThinkingLabel");
+    if (!modelSelect || !effortSelect) return;
+    const modelValue = String(modelSelect.value || "").split("::").slice(1).join("::");
+    const provider = fn15(modelValue);
+    const shouldShow = fn17(provider, modelValue);
+    if (effortRow) effortRow.classList.toggle("hidden", !shouldShow);
+    if (effortLabel) effortLabel.textContent = isPrimary ? "主模型强度" : "思考模型强度";
+    if (!shouldShow) return;
+    const currentEffort = selectedEffort === undefined ? effortSelect.value : selectedEffort;
+    const normalizedEffort = fn18(provider, currentEffort, modelValue);
+    const isGpt56 = provider === "gpt" && /^gpt-5\.6(?:-|$)/.test(fn14(modelValue));
+    const options = isGpt56 ? tmp20.gpt56 : tmp20[provider] || tmp20.claude;
+    effortSelect.innerHTML = options.map(([value, label]) => `<option value="${value}"${normalizedEffort === value ? " selected" : ""}>${label}</option>`).join("");
+    effortSelect.value = normalizedEffort;
   }
   function fn2(arg0) {
     return arg0 === 2 ? 2 : 1;
@@ -178,7 +213,14 @@
     const tmp12 = Array.isArray(arg0.patches) ? arg0.patches : [];
     const tmp22 = tmp12.filter(arg02 => arg02 && arg02.status === "applied").length;
     const tmp32 = tmp12.length > 0 && tmp22 === tmp12.length;
-    fn8(fn4("patchBadge"), tmp32, tmp32 ? "已就绪" : "需安装");
+    fn8(fn4("patchBadge"), tmp32, tmp32 ? "补丁已就绪" : "补丁需安装");
+    fn8(fn4("patchDetailBadge"), tmp32, tmp32 ? "已就绪" : "需安装");
+    const applyPatchButton = document.querySelector('[data-ws-action="applyPatch"]');
+    if (applyPatchButton) {
+      applyPatchButton.textContent = tmp32 ? "重新安装" : "安装补丁";
+      applyPatchButton.classList.toggle("btn-p", !tmp32);
+      applyPatchButton.classList.toggle("btn-s", tmp32);
+    }
     if (arg0.path) {
       tmp1 = arg0.path;
     } else {
@@ -223,10 +265,10 @@
     return null;
   }
   const tmp20 = {
-    claude: [["", "关闭 · 不启用思考"], ["low", "低 · budget 5k / adaptive"], ["medium", "中 · 推荐平衡"], ["high", "高 · 复杂分析/代码"], ["xhigh", "极高 · Opus 4.7/4.8"], ["max", "Max · Claude 最深思考"]],
-    gpt: [["", "关闭 · 不启用 reasoning"], ["low", "低 · reasoning.effort=low"], ["medium", "中 · reasoning.effort=medium"], ["high", "高 · reasoning.effort=high"], ["xhigh", "极高 · reasoning.effort=xhigh"]],
-    gpt56: [["", "关闭 · 不启用 reasoning"], ["low", "低 · reasoning.effort=low"], ["medium", "中 · reasoning.effort=medium"], ["high", "高 · reasoning.effort=high"], ["xhigh", "极高 · reasoning.effort=xhigh"], ["max", "Max · GPT-5.6 最深推理"]],
-    gemini: [["", "默认 · medium（API 默认，不覆盖）"], ["minimal", "Minimal · 最低思考 / 最低延迟"], ["low", "Low · 速度优先"], ["medium", "Medium · 推荐平衡"], ["high", "High · 最深推理"]]
+    claude: [["", "关闭"], ["low", "低 · 速度优先"], ["medium", "中 · 推荐"], ["high", "高 · 深度分析"], ["xhigh", "极高 · 复杂任务"], ["max", "Max · 最深思考"]],
+    gpt: [["", "关闭"], ["low", "低 · 速度优先"], ["medium", "中 · 推荐"], ["high", "高 · 深度分析"], ["xhigh", "极高 · 复杂任务"]],
+    gpt56: [["", "关闭"], ["low", "低 · 速度优先"], ["medium", "中 · 推荐"], ["high", "高 · 深度分析"], ["xhigh", "极高 · 复杂任务"], ["max", "Max · 最深推理"]],
+    gemini: [["", "默认"], ["minimal", "最低 · 延迟优先"], ["low", "低 · 速度优先"], ["medium", "中 · 推荐"], ["high", "高 · 最深推理"]]
   };
   const tmp21 = new Set(["cfgByok1Host", "cfgByok1Key", "cfgByok1Model", "cfgByok1ThinkingEffort", "cfgByok1ReasoningMode", "cfgByok1ServiceTier", "cfgByok2Host", "cfgByok2Key", "cfgByok2Model", "cfgByok2ThinkingEffort", "cfgByok2ReasoningMode", "cfgByok2ServiceTier", "cfgHybridPort", "cfgInferencePort", "cfgAnthropicPath", "cfgOpenaiPath", "cfgMaxTokens", "cfgCompletionTimeoutMs", "cfgSysPromptOverride", "cfgSysPromptPath", "cfgSimpleHost", "cfgSimpleKey", "cfgSimplePrimaryModel", "cfgSimpleThinkingModel", "cfgSimplePrimaryThinkingEffort", "cfgSimpleThinkingEffort"]);
   let tmp22 = null;
@@ -250,15 +292,6 @@
     }, 650);
   }
   function fn16(arg0) {
-    if (arg0 === "gpt") {
-      return "GPT · reasoning.effort";
-    }
-    if (arg0 === "gemini") {
-      return "Gemini 3.5 Flash · thinking_level";
-    }
-    if (arg0 === "claude") {
-      return "Claude · adaptive / budget_tokens";
-    }
     return "思考强度";
   }
   function fn17(arg0, arg1) {
@@ -439,6 +472,18 @@
     if (arg0) {
       fn23(arg0, 1);
       fn23(arg0, 2);
+      const activePrimaryModel = fn4("activePrimaryModel");
+      const activeThinkingModel = fn4("activeThinkingModel");
+      const primaryModel = String(arg0.BYOK1_MODEL || arg0.DEFAULT_MODEL || "").trim();
+      const thinkingModel = String(arg0.BYOK2_MODEL || primaryModel || "").trim();
+      if (activePrimaryModel) {
+        activePrimaryModel.textContent = primaryModel || "未配置";
+        activePrimaryModel.title = primaryModel || "未配置";
+      }
+      if (activeThinkingModel) {
+        activeThinkingModel.textContent = thinkingModel || "未配置";
+        activeThinkingModel.title = thinkingModel || "未配置";
+      }
       fn13("cfgAnthropicPath", arg0.BYOK1_ANTHROPIC_API_PATH || arg0.ANTHROPIC_API_PATH || "");
       fn13("cfgOpenaiPath", arg0.BYOK1_OPENAI_API_PATH || arg0.OPENAI_API_PATH || "");
       fn13("cfgMaxTokens", arg0.MAX_TOKENS || "16384");
@@ -516,45 +561,56 @@
   }
   function fn26(arg0) {
     const tmp12 = fn2(arg0);
-    const tmp22 = fn11(tmp12);
-    const tmp32 = fn10(tmp12);
-    const tmp4 = fn4("cfgByok" + tmp12 + "Model");
-    const tmp5 = (tmp4 || {}).value || "";
-    const tmp6 = "BYOK" + tmp12 + "_";
+    const tmp22 = gatewayConfig.activeSlots && gatewayConfig.activeSlots["byok" + tmp12];
+    const tmp32 = tmp22 && gatewayConfig.gateways.find(arg02 => arg02.id === tmp22.gatewayId);
+    const tmp4 = ((fn4("cfgByok" + tmp12 + "Model") || {}).value || "").trim();
+    const tmp5 = (tmp32 && tmp32.baseUrl || fn10(tmp12) || "").trim();
+    const tmp6 = (tmp32 && tmp32.apiKey || fn11(tmp12) || "").trim();
+    const tmp7 = (tmp22 && tmp22.model || tmp4 || "").trim();
+    const tmp8 = (tmp22 && tmp22.thinkingEffort || (fn4("cfgByok" + tmp12 + "ThinkingEffort") || {}).value || "").trim();
+    if (!tmp5 && !tmp6 && !tmp7) {
+      return {};
+    }
+    const tmp9 = "BYOK" + tmp12 + "_";
     return {
-      [tmp6 + "ANTHROPIC_API_HOST"]: tmp32,
-      [tmp6 + "ANTHROPIC_API_KEY"]: tmp22,
-      [tmp6 + "ANTHROPIC_API_PATH"]: (fn4("cfgAnthropicPath") || {}).value || "",
-      [tmp6 + "OPENAI_API_HOST"]: tmp32,
-      [tmp6 + "OPENAI_API_KEY"]: tmp22,
-      [tmp6 + "OPENAI_API_PATH"]: (fn4("cfgOpenaiPath") || {}).value || "",
-      [tmp6 + "OPENAI_SERVICE_TIER"]: ((fn4("cfgByok" + tmp12 + "ServiceTier") || {}).value || "").trim(),
-      [tmp6 + "OPENAI_REASONING_MODE"]: ((fn4("cfgByok" + tmp12 + "ReasoningMode") || {}).value || "").trim(),
-      [tmp6 + "MODEL"]: tmp5,
-      [tmp6 + "THINKING_EFFORT"]: ((fn4("cfgByok" + tmp12 + "ThinkingEffort") || {}).value || "").trim()
+      [tmp9 + "ANTHROPIC_API_HOST"]: tmp5,
+      [tmp9 + "ANTHROPIC_API_KEY"]: tmp6,
+      [tmp9 + "ANTHROPIC_API_PATH"]: (fn4("cfgAnthropicPath") || {}).value || "",
+      [tmp9 + "OPENAI_API_HOST"]: tmp5,
+      [tmp9 + "OPENAI_API_KEY"]: tmp6,
+      [tmp9 + "OPENAI_API_PATH"]: (fn4("cfgOpenaiPath") || {}).value || "",
+      [tmp9 + "OPENAI_SERVICE_TIER"]: ((fn4("cfgByok" + tmp12 + "ServiceTier") || {}).value || "").trim(),
+      [tmp9 + "OPENAI_REASONING_MODE"]: ((fn4("cfgByok" + tmp12 + "ReasoningMode") || {}).value || "").trim(),
+      [tmp9 + "MODEL"]: tmp7,
+      [tmp9 + "THINKING_EFFORT"]: tmp8
     };
   }
   function fn27() {
     const tmp02 = fn26(1);
     const tmp12 = fn26(2);
+    const tmp22 = Object.prototype.hasOwnProperty.call(tmp02, "BYOK1_MODEL");
+    const customThinkingEnabled = fn4("cfgCustomThinkingEnabled")?.checked === true || (!fn4("cfgCustomThinkingEnabled") && gatewayConfig.customThinkingEnabled === true);
     return {
       ...tmp02,
       ...tmp12,
-      ANTHROPIC_API_HOST: tmp02.BYOK1_ANTHROPIC_API_HOST,
-      ANTHROPIC_API_KEY: tmp02.BYOK1_ANTHROPIC_API_KEY,
-      ANTHROPIC_API_PATH: tmp02.BYOK1_ANTHROPIC_API_PATH,
-      OPENAI_API_HOST: tmp02.BYOK1_OPENAI_API_HOST,
-      OPENAI_API_KEY: tmp02.BYOK1_OPENAI_API_KEY,
-      OPENAI_API_PATH: tmp02.BYOK1_OPENAI_API_PATH,
-      OPENAI_SERVICE_TIER: tmp02.BYOK1_OPENAI_SERVICE_TIER || "",
-      OPENAI_REASONING_MODE: tmp02.BYOK1_OPENAI_REASONING_MODE || "",
-      DEFAULT_MODEL: tmp02.BYOK1_MODEL,
+      ...(tmp22 ? {
+        ANTHROPIC_API_HOST: tmp02.BYOK1_ANTHROPIC_API_HOST,
+        ANTHROPIC_API_KEY: tmp02.BYOK1_ANTHROPIC_API_KEY,
+        ANTHROPIC_API_PATH: tmp02.BYOK1_ANTHROPIC_API_PATH,
+        OPENAI_API_HOST: tmp02.BYOK1_OPENAI_API_HOST,
+        OPENAI_API_KEY: tmp02.BYOK1_OPENAI_API_KEY,
+        OPENAI_API_PATH: tmp02.BYOK1_OPENAI_API_PATH,
+        OPENAI_SERVICE_TIER: tmp02.BYOK1_OPENAI_SERVICE_TIER || "",
+        OPENAI_REASONING_MODE: tmp02.BYOK1_OPENAI_REASONING_MODE || "",
+        DEFAULT_MODEL: tmp02.BYOK1_MODEL,
+        OPENAI_REASONING_EFFORT: customThinkingEnabled ? tmp02.BYOK1_THINKING_EFFORT || "" : "",
+        OPENAI_THINKING_ENABLED: customThinkingEnabled ? "true" : "false"
+      } : {}),
+      CUSTOM_THINKING_ENABLED: customThinkingEnabled ? "true" : "false",
       MAX_TOKENS: (fn4("cfgMaxTokens") || {}).value || "16384",
       COMPLETION_TIMEOUT_MS: (fn4("cfgCompletionTimeoutMs") || {}).value || "12000",
       HYBRID_PORT: (fn4("cfgHybridPort") || {}).value || "3006",
       INFERENCE_PORT: (fn4("cfgInferencePort") || {}).value || "3001",
-      OPENAI_REASONING_EFFORT: tmp02.BYOK1_THINKING_EFFORT || "",
-      OPENAI_THINKING_ENABLED: tmp02.BYOK1_THINKING_EFFORT ? "true" : "",
       SYSTEM_PROMPT_OVERRIDE: (fn4("cfgSysPromptOverride") || {}).value === "true" ? "true" : "false",
       SYSTEM_PROMPT_PATH: (fn4("cfgSysPromptPath") || {}).value || ""
     };
@@ -736,7 +792,7 @@
       tmp32.textContent = String(arg0.requestCount || 0);
     }
     if (tmp4) {
-      const tmp02 = arg0.running ? "<button type=\"button\" class=\"btn btn-d\" data-ws-action=\"stopProxy\">停止代理</button>" : "<button type=\"button\" class=\"btn btn-p\" data-ws-action=\"startProxy\" data-ws-mode=\"both\">一键启动</button>";
+      const tmp02 = arg0.running ? "<button type=\"button\" class=\"btn btn-d\" data-ws-action=\"stopProxy\">停止</button>" : "<button type=\"button\" class=\"btn btn-p\" data-ws-action=\"startProxy\" data-ws-mode=\"both\">启动代理</button>";
       if (tmp4.innerHTML !== tmp02) {
         tmp4.innerHTML = tmp02;
       }
@@ -775,25 +831,8 @@
     tmp12.addEventListener("touchend", tmp4);
     tmp12.addEventListener("keyup", tmp4);
   }
-  function switchTab(tabId) {
-    document.querySelectorAll(".tab-btn").forEach(btn => {
-      btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
-    });
-    document.querySelectorAll(".tab-content").forEach(content => {
-      content.classList.toggle("active", content.id === tabId);
-    });
-    tmp3.activeTab = tabId;
-    tmp0.setState(tmp3);
-  }
   function tmp43() {}
   document.addEventListener("click", arg0 => {
-    const tabBtn = arg0.target && arg0.target.closest ? arg0.target.closest(".tab-btn") : null;
-    if (tabBtn) {
-      const tabId = tabBtn.getAttribute("data-tab");
-      switchTab(tabId);
-      arg0.preventDefault();
-      return;
-    }
     const tmp12 = arg0.target && arg0.target.closest ? arg0.target.closest("[data-ws-toggle]") : null;
     if (tmp12) {
       fn36(tmp12);
@@ -933,6 +972,11 @@
       fn4("newGatewayName").value = "";
       fn4("newGatewayBaseUrl").value = "";
       fn4("newGatewayApiKey").value = "";
+      const addBtn = document.querySelector('[data-ws-action="addGateway"]');
+      if (addBtn) {
+        addBtn.textContent = "保存网关";
+        addBtn.removeAttribute("data-editing-id");
+      }
     } else if (tmp32 === "addGateway") {
       const name = (fn4("newGatewayName").value || "").trim();
       const baseUrl = (fn4("newGatewayBaseUrl").value || "").trim();
@@ -945,7 +989,7 @@
       if (editingId) {
         fn7("config", "busy", "正在保存修改...");
         fn5("editGateway", { gatewayId: editingId, name: name, baseUrl: baseUrl, apiKey: apiKey });
-        tmp22.textContent = "添加网关";
+        tmp22.textContent = "保存网关";
         tmp22.removeAttribute("data-editing-id");
       } else {
         fn7("config", "busy", "正在添加网关...");
@@ -983,6 +1027,7 @@
       const thinkingSelect = fn4("cfgMultiThinkingModel");
       const primaryThinkingSelect = fn4("cfgMultiPrimaryThinkingEffort");
       const thinkingEffortSelect = fn4("cfgMultiThinkingEffort");
+      const customThinkingToggle = fn4("cfgCustomThinkingEnabled");
       const primaryValue = (primarySelect && primarySelect.value || "").trim();
       const thinkingValue = (thinkingSelect && thinkingSelect.value || "").trim();
       if (!primaryValue || !thinkingValue) {
@@ -1000,7 +1045,8 @@
         byok1ThinkingEffort: byok1ThinkingEffort,
         byok2GatewayId: byok2GatewayId,
         byok2Model: byok2Model,
-        byok2ThinkingEffort: byok2ThinkingEffort
+        byok2ThinkingEffort: byok2ThinkingEffort,
+        customThinkingEnabled: customThinkingToggle?.checked === true
       });
     } else if (tmp32 === "promptTemplates") {
       fn7("config", "busy", "请选择提示词模板...");
@@ -1068,6 +1114,12 @@
       fn5("setAutoStartProxy", {
         value: tmp12.checked === true
       });
+    } else if (tmp12.id === "cfgCustomThinkingEnabled") {
+      updateCustomThinkingVisibility();
+    } else if (tmp12.id === "cfgMultiPrimaryModel") {
+      updateMultiThinkingOptions("primary");
+    } else if (tmp12.id === "cfgMultiThinkingModel") {
+      updateMultiThinkingOptions("thinking");
     } else if (fn20a(tmp12)) {
       if (tmp12.id === "cfgByok1Model" || tmp12.id === "cfgByok2Model" || tmp12.id === "cfgByok1ThinkingEffort" || tmp12.id === "cfgByok2ThinkingEffort" || tmp12.id === "cfgSimplePrimaryModel" || tmp12.id === "cfgSimpleThinkingModel" || tmp12.id === "cfgSimplePrimaryThinkingEffort" || tmp12.id === "cfgSimpleThinkingEffort") {
         const tmp02 = /cfgByok2|cfgSimpleThinking/.test(tmp12.id) ? 2 : 1;
@@ -1119,7 +1171,8 @@
         renderGatewayList();
       }
     } else if (tmp12.type === "actionState" && tmp12.section) {
-      fn7(tmp12.section, tmp12.state === "error" ? "error" : "success", tmp12.message || "完成");
+      const actionState = ["busy", "success", "error"].includes(tmp12.state) ? tmp12.state : "success";
+      fn7(tmp12.section, actionState, tmp12.message || "完成");
     } else if (tmp12.type === "modelList") {
       const tmp02 = fn2(tmp12.slot);
       if (tmp12.loading) {
@@ -1207,6 +1260,13 @@
       const tmp13 = /GetChatMessage|GetStreamingCompletions|GetEmbeddings/.test(tmp12.line) ? " hi" : /err|stderr/i.test(tmp12.line) ? " err" : "";
       tmp02.innerHTML += "<div class=\"log-line" + tmp13 + "\">" + fn6(tmp12.line) + "</div>";
       tmp02.scrollTop = tmp02.scrollHeight;
+      if (tmp13 === " err") {
+        const advancedBody = fn4("advancedBody");
+        const logBody = fn4("logBody");
+        if (advancedBody) advancedBody.classList.remove("hidden");
+        if (logBody) logBody.classList.remove("hidden");
+        document.querySelectorAll('[data-ws-toggle="advancedBody"], [data-ws-toggle="logBody"]').forEach(toggle => toggle.classList.remove("collapsed"));
+      }
     }
   });
   fn37();
@@ -1224,6 +1284,4 @@
     }
   });
   fn20();
-  const initialTab = tmp3.activeTab || "tab-config";
-  switchTab(initialTab);
 })();

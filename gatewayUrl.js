@@ -33,8 +33,80 @@ function ensureGatewayUrl(arg0) {
   return tmp2 + stripProtoServer(tmp1);
 }
 
+function normalizePathname(arg0) {
+  const tmp1 = String(arg0 || "").trim().replace(/\/+$/, "");
+  return tmp1 && tmp1 !== "/" ? (tmp1.startsWith("/") ? tmp1 : "/" + tmp1) : "";
+}
+
+function stripKnownGatewayEndpoint(arg0) {
+  const tmp1 = normalizePathname(arg0);
+  if (!tmp1) {
+    return "";
+  }
+  return normalizePathname(tmp1
+    .replace(/\/chat\/completions$/i, "")
+    .replace(/\/(?:messages|responses|models|completions)$/i, ""));
+}
+
+function inferGatewayApiPrefix(arg0) {
+  const tmp1 = new URL(ensureGatewayUrl(arg0));
+  const tmp2 = normalizePathname(tmp1.pathname);
+  if (!tmp2) {
+    return "/v1";
+  }
+  const tmp3 = stripKnownGatewayEndpoint(tmp2);
+  if (tmp3) {
+    return tmp3;
+  }
+  return /\/(?:messages|responses|models|completions)$/i.test(tmp2) ? "" : tmp2;
+}
+
+function buildGatewayModelUrls(arg0) {
+  const tmp1 = new URL(ensureGatewayUrl(arg0));
+  tmp1.search = "";
+  tmp1.hash = "";
+  const tmp2 = normalizePathname(tmp1.pathname);
+  const tmp3 = inferGatewayApiPrefix(arg0);
+  const tmp4 = [];
+  const fn = arg02 => {
+    const tmp02 = new URL(tmp1.toString());
+    tmp02.pathname = normalizePathname(arg02) || "/models";
+    const tmp12 = tmp02.toString();
+    if (!tmp4.includes(tmp12)) {
+      tmp4.push(tmp12);
+    }
+  };
+  if (/\/models$/i.test(tmp2)) {
+    fn(tmp2);
+  }
+  fn(tmp3 + "/models");
+  if (tmp3 !== "/v1") {
+    fn("/v1/models");
+  }
+  if (tmp3 !== "") {
+    fn("/models");
+  }
+  return tmp4;
+}
+
+function deriveGatewayApiPaths(arg0, arg1 = "") {
+  const tmp1 = arg1 ? inferGatewayApiPrefix(arg1) : inferGatewayApiPrefix(arg0);
+  const tmp2 = tmp1;
+  return {
+    apiPrefix: tmp2,
+    modelsPath: tmp2 + "/models",
+    anthropicPath: tmp2 + "/messages",
+    openaiResponsesPath: tmp2 + "/responses",
+    openaiChatPath: tmp2 + "/chat/completions"
+  };
+}
+
 module.exports = {
   stripProtoServer,
   shouldUseHttpGateway,
-  ensureGatewayUrl
+  ensureGatewayUrl,
+  stripKnownGatewayEndpoint,
+  inferGatewayApiPrefix,
+  buildGatewayModelUrls,
+  deriveGatewayApiPaths
 };

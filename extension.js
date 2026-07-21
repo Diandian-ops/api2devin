@@ -23,8 +23,8 @@ function activate(context) {
   }
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('devin-byok-bridge.sidebar', sidebar),
-    vscode.commands.registerCommand('devin-byok-bridge.startProxy', async () => {
+    vscode.window.registerWebviewViewProvider('api2devin.sidebar', sidebar),
+    vscode.commands.registerCommand('api2devin.startProxy', async () => {
       const ok = await proxyManager.start('both', sidebar.getRuntimeConfigForCurrentMode());
       if (ok) {
         await sidebar.ensurePatchAppliedAfterProxyStart(true);
@@ -32,12 +32,12 @@ function activate(context) {
         sidebar.refresh();
       }
     }),
-    vscode.commands.registerCommand('devin-byok-bridge.stopProxy', () => {
+    vscode.commands.registerCommand('api2devin.stopProxy', () => {
       proxyManager.stop();
       vscode.window.showInformationMessage('Devin BYOK Bridge 已停止');
       sidebar.refresh();
     }),
-    vscode.commands.registerCommand('devin-byok-bridge.applyPatch', async () => {
+    vscode.commands.registerCommand('api2devin.applyPatch', async () => {
       const status = proxyManager.getStatus();
       const result = PatchManager.applyWithCustomUrls(
         PatchManager.loopbackApiUrl(status.hybridPort),
@@ -54,7 +54,7 @@ function activate(context) {
       }
       sidebar.refresh();
     }),
-    vscode.commands.registerCommand('devin-byok-bridge.revertPatch', async () => {
+    vscode.commands.registerCommand('api2devin.revertPatch', async () => {
       if (PatchManager.revert()) {
         vscode.window.showInformationMessage('补丁已还原，需重启 Devin Desktop');
       } else {
@@ -62,7 +62,7 @@ function activate(context) {
       }
       sidebar.refresh();
     }),
-    vscode.commands.registerCommand('devin-byok-bridge.reloadWorkbench', () => reloadWorkbenchWindow())
+    vscode.commands.registerCommand('api2devin.reloadWorkbench', () => reloadWorkbenchWindow())
   );
 
   if (context.globalState.get(KEY_AUTO_START_PROXY) === true) {
